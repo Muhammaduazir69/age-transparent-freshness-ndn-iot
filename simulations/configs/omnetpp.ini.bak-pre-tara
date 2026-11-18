@@ -1,0 +1,798 @@
+# =============================================================================
+#  NDN-IoT-SHADE: one detailed scenario, "ShadeCampus".
+#  A 6 x 6 IEEE 802.15.4 smart-campus sensing field with one sink/producer and
+#  35 consumer sensors runs through four operating regimes of 400 s each:
+#    R0 stationary   Zipf(0.9) over 100 named readings
+#    R1 drift        every 20 s ten never-seen names enter the top ranks (new content)
+#    R2 pollution    3 compromised sensors request never-repeated names (3/s each)
+#    R3 flash        request rate x2, Zipf(1.2), FreshnessPeriod x0.15 (event data)
+#  Every configuration below differs from ShadeBase in the cache policy only.
+# =============================================================================
+[General]
+network = ndniot.simulations.topologies.ShadeCampus
+sim-time-limit = 1600s
+cmdenv-express-mode = true
+cmdenv-status-frequency = 60s
+result-dir = ../../results
+output-scalar-file = ${resultdir}/${configname}-${runnumber}.sca
+output-vector-file = ${resultdir}/${configname}-${runnumber}.vec
+repeat = 30
+seed-set = ${runnumber}
+# Independent random-number streams, so that a seed fixes the workload: every
+# consumer (request times, names, attacker junk) draws from stream 1 and the
+# producers from stream 2, untouched by whatever the caching policy does; the
+# policies' own randomness (Q-learning exploration, bandits, random and static
+# selection, LeCaR) uses stream 3; MAC and radio keep stream 0.
+num-rngs = 4
+**.consumer.rng-0 = 1
+**.producer.rng-0 = 2
+**.ndn.processor.rng-0 = 3
+**.ndn.cs.rng-0 = 3
+**.activeExpert:vector.vector-recording = true
+**.phAlarm:vector.vector-recording = true
+**.regime:vector.vector-recording = true
+**.epochLookups:vector.vector-recording = true
+**.epochValid:vector.vector-recording = true
+**.epochStale:vector.vector-recording = true
+# first matching line wins: the blanket switch-off must come after the exceptions
+**.vector-recording = false
+
+[Config ShadeBase]
+abstract = true
+*.radioMedium.sameTransmissionStartTimeCheck = "ignore"
+**.arp.typename = "GlobalArp"
+**.netmaskRoutes = ""
+*.configurator.config = xml("<config><interface hosts='**' address='10.0.x.x' netmask='255.255.0.0'/></config>")
+
+# ---- field: 6 x 6 lattice, 30 m spacing, INET SensorNode + 802.15.4 ----
+*.cols = 6
+*.rows = 6
+*.sensor[*].mobility.typename = "StationaryMobility"
+*.sensor[*].mobility.initialX = 60m + (parentIndex() % 6) * 30m
+*.sensor[*].mobility.initialY = 60m + int(parentIndex() / 6) * 30m
+*.sensor[*].mobility.initialZ = 0m
+*.sensor[*].mobility.initFromDisplayString = false
+
+# ---- radio: -10 dBm transmit power (a standard CC2420 setting); with the
+#      802.15.4 breakpoint path loss a frame is decodable to about 72 m, so a
+#      node reaches its lattice and diagonal neighbors but not the far field ----
+**.wlan[0].radio.transmitter.power = 0.1mW
+
+# ---- energy: 50 J battery per sensor, state-based radio consumption ----
+**.hasStatus = true
+**.energyStorage.typename = "SimpleEpEnergyStorage"
+**.energyStorage.nominalCapacity = 50J
+**.energyStorage.initialCapacity = 50J
+**.wlan[0].radio.energyConsumer.typename = "SensorStateBasedEpEnergyConsumer"
+**.residualEnergyCapacity:last.scalar-recording = true
+
+# ---- NDN overlay on every sensor ----
+*.sensor[*].numApps = 1
+*.sensor[*].app[0].typename = "ndniot.apps.NdnOverlayApp"
+*.sensor[*].app[0].nodeId = parentIndex()
+*.sensor[*].app[0].maxWireFaces = 4
+*.sensor[*].app[0].csMaxEntries = 10
+*.sensor[*].app[0].ndn.processorTypename = "ndniot.shade.ShadeNDNProcessor"
+*.sensor[*].app[0].ndn.csTypename = "ndniot.shade.ShadeCS"
+*.sensor[*].app[0].cacheReplacementPolicy = "LRU"
+
+# ---- workload: sink 35 produces /campus/env, every other sensor consumes ----
+*.sensor[35].app[0].producedPrefix = "/campus/env"
+*.sensor[35].app[0].isConsumer = false
+*.sensor[35].app[0].enableCaching = false
+*.sensor[*].app[0].contentPrefix = "/campus/env"
+*.sensor[*].app[0].catalogSize = 100
+*.sensor[*].app[0].requestRate = 0.25
+*.sensor[*].app[0].freshnessPeriod = 60s
+*.sensor[*].app[0].freshnessClasses = "30,90,300"
+*.sensor[*].app[0].consumer.startTime = uniform(5s, 10s)
+
+# ---- compromised sensors (pollution regime only) ----
+*.sensor[0].app[0].consumer.attacker = true
+*.sensor[5].app[0].consumer.attacker = true
+*.sensor[30].app[0].consumer.attacker = true
+
+# ---- regime timeline (the routers never read it) ----
+*.regimeController.regimeNames = "stationary drift pollution flash"
+*.regimeController.regimeStarts = "0 400 800 1200"
+*.regimeController.zipfAlpha = "0.9 0.9 0.9 1.2"
+*.regimeController.rateScale = "1 1 1 2"
+*.regimeController.driftPeriod = "0 20 0 0"
+*.regimeController.driftStep = "0 -10 0 0"
+*.sensor[*].app[0].consumer.nameSpace = 100000
+*.regimeController.attackRate = "0 0 3 0"
+*.regimeController.freshScale = "1 1 1 0.15"
+
+# ---- caching expert portfolio (shared by every configuration) ----
+**.ndn.processor.experts = "LCE-LRU LCE-LFUA FRESH-LFFO DOOR-LRU QL-LRU"
+# ---- selector parameters chosen on development seeds 0-4 by one rule for every
+#      method (highest whole-run valid cache service); see Revision_Plan/tuning_log.md
+# Two coordinate passes: (lambda, h) at beta = 1, then beta, and (lambda, h, rho,
+# epoch) again at beta = 6. Development configurations defined before the second
+# pass (Dev-*, tune/*) were run at beta = 1, lambda = 0.5; set both to reproduce them.
+**.ndn.processor.staleWeight = 6.0
+**.ndn.processor.phLambda = 1.0
+**.ndn.processor.hysteresis = 0.005
+**.ndn.processor.exp3Gamma = 0.2
+**.ndn.processor.ducbXi = 0.05
+**.ndn.processor.ducbGamma = 0.995   # round-5 screen (results/tune6); tune5 runs used 0.99
+
+# ===================== control timeline (regime-effect checks) =================
+# Same network and seeds, but all four windows run the stationary regime, so
+# the effect of each regime is measured against the same time window.
+[Config Ctrl]
+abstract = true
+extends = ShadeBase
+*.regimeController.zipfAlpha = "0.9 0.9 0.9 0.9"
+*.regimeController.rateScale = "1 1 1 1"
+*.regimeController.driftPeriod = "0 0 0 0"
+*.regimeController.driftStep = "0 0 0 0"
+*.regimeController.attackRate = "0 0 0 0"
+*.regimeController.freshScale = "1 1 1 1"
+**.ndn.processor.selector = "fixed"
+
+[Config Ctrl-LCE-LRU]
+extends = Ctrl
+**.ndn.processor.fixedExpert = 0
+[Config Ctrl-LCE-LFUA]
+extends = Ctrl
+**.ndn.processor.fixedExpert = 1
+[Config Ctrl-FRESH-LFFO]
+extends = Ctrl
+**.ndn.processor.fixedExpert = 2
+[Config Ctrl-DOOR-LRU]
+extends = Ctrl
+**.ndn.processor.fixedExpert = 3
+[Config Ctrl-QL-LRU]
+extends = Ctrl
+**.ndn.processor.fixedExpert = 4
+[Config Ctrl-SHADE]
+extends = Ctrl
+**.ndn.processor.selector = "shade"
+
+# ============================ fixed experts ==================================
+[Config Fixed-LCE-LRU]
+extends = ShadeBase
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 0
+
+[Config Fixed-LCE-LFUA]
+extends = ShadeBase
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 1
+
+[Config Fixed-FRESH-LFFO]
+extends = ShadeBase
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 2
+
+[Config Fixed-DOOR-LRU]
+extends = ShadeBase
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 3
+
+[Config Fixed-QL-LRU]
+extends = ShadeBase
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 4
+
+# ============================ prior adaptive policies =========================
+[Config LeCaR]
+description = "LeCaR (Vietri et al. 2018): regret-weighted LRU/LFU eviction, LCE admission"
+extends = ShadeBase
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 0
+*.sensor[*].app[0].cacheReplacementPolicy = "LECAR"
+
+[Config EXP3]
+description = "Ablation: no ghosts, bandit feedback on the active expert only (EXP3)"
+extends = ShadeBase
+**.ndn.processor.selector = "exp3"
+
+[Config Random]
+description = "Sanity: a uniformly random expert every epoch"
+extends = ShadeBase
+**.ndn.processor.selector = "random"
+
+[Config DUCB]
+description = "Switching-bandit baseline: discounted UCB (Garivier and Moulines 2011), no ghosts"
+extends = ShadeBase
+**.ndn.processor.selector = "ducb"
+
+[Config Static]
+description = "Diversity control: one uniformly random expert per node, fixed for the whole run"
+extends = ShadeBase
+**.ndn.processor.selector = "static"
+
+# ============================ SHADE and ablations =============================
+[Config SHADE]
+description = "Proposed: ghost-cache feedback, discounted leader, hysteresis, Page-Hinkley forgetting"
+extends = ShadeBase
+**.ndn.processor.selector = "shade"
+
+[Config SHADE-noPH]
+extends = SHADE
+**.ndn.processor.pageHinkley = false
+
+[Config SHADE-noDiscount]
+extends = SHADE
+**.ndn.processor.discount = 1.0
+**.ndn.processor.pageHinkley = false
+
+[Config SHADE-noHysteresis]
+extends = SHADE
+**.ndn.processor.hysteresis = 0
+
+# ============================ deep RL comparator ==============================
+# MAACO-style DQN admission + A2C eviction (python/maaco), trained by
+# python/maaco/train.py on this very scenario with seeds 100000+ (disjoint from
+# the evaluation seeds), then evaluated with the bridge in "infer" mode.
+[Config DRL-Train]
+extends = ShadeBase
+*.rlBridge.mode = "train"
+*.sensor[*].app[0].ndn.processorTypename = "ndniot.rlndn.RlNDNProcessor"
+*.sensor[*].app[0].ndn.csTypename = "ndniot.rlndn.RlCS"
+*.sensor[*].app[0].ndn.processor.placementPolicy = "rl"
+*.sensor[*].app[0].cacheReplacementPolicy = "RL"
+
+[Config DRL]
+description = "Deep RL comparator (DQN admission + A2C eviction), inference only"
+extends = DRL-Train
+*.rlBridge.mode = "infer"
+
+# ============== development-only variants (seeds 0-4, never reported as results) ==============
+[Config Dev-minL5]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.minLookups = 5
+[Config Dev-hys02]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.hysteresis = 0.02
+[Config Dev-beta05]
+extends = SHADE
+**.ndn.processor.staleWeight = 0.5
+[Config Dev-lam1]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 1.0
+[Config Dev-rho08]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.discount = 0.8
+[Config Dev-minL5-hys02]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.minLookups = 5
+**.ndn.processor.hysteresis = 0.02
+
+# ============== sensitivity of SHADE (evaluation seeds 10-19, one factor each) ==============
+# defaults: rho 0.9, lambda 1, epoch 10 s, beta 6, h 0.005
+[Config Sens-rho080]
+extends = SHADE
+**.ndn.processor.discount = 0.8
+[Config Sens-rho095]
+extends = SHADE
+**.ndn.processor.discount = 0.95
+[Config Sens-rho098]
+extends = SHADE
+**.ndn.processor.discount = 0.98
+[Config Sens-lam050]
+extends = SHADE
+**.ndn.processor.phLambda = 0.5
+[Config Sens-lam200]
+extends = SHADE
+**.ndn.processor.phLambda = 2.0
+[Config Sens-lam400]
+extends = SHADE
+**.ndn.processor.phLambda = 4.0
+[Config Sens-epoch05]
+extends = SHADE
+**.ndn.processor.epoch = 5s
+[Config Sens-epoch20]
+extends = SHADE
+**.ndn.processor.epoch = 20s
+[Config Sens-beta000]
+extends = SHADE
+**.ndn.processor.staleWeight = 0
+[Config Sens-beta100]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0
+[Config Sens-beta200]
+extends = SHADE
+**.ndn.processor.staleWeight = 2.0
+[Config Sens-beta1200]
+extends = SHADE
+**.ndn.processor.staleWeight = 12.0
+[Config Sens-hys000]
+extends = SHADE
+**.ndn.processor.hysteresis = 0
+[Config Sens-hys010]
+extends = SHADE
+**.ndn.processor.hysteresis = 0.01
+[Config Sens-hys020]
+extends = SHADE
+**.ndn.processor.hysteresis = 0.02
+
+# ============== Content Store size (evaluation seeds 10-19) ==============
+[Config B5-SHADE]
+extends = SHADE
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B5-Fixed-QL-LRU]
+extends = Fixed-QL-LRU
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B5-Fixed-DOOR-LRU]
+extends = Fixed-DOOR-LRU
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B5-Fixed-LCE-LRU]
+extends = Fixed-LCE-LRU
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B5-LeCaR]
+extends = LeCaR
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B5-EXP3]
+extends = EXP3
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B20-SHADE]
+extends = SHADE
+*.sensor[*].app[0].csMaxEntries = 20
+[Config B20-Fixed-QL-LRU]
+extends = Fixed-QL-LRU
+*.sensor[*].app[0].csMaxEntries = 20
+[Config B20-Fixed-DOOR-LRU]
+extends = Fixed-DOOR-LRU
+*.sensor[*].app[0].csMaxEntries = 20
+[Config B20-Fixed-LCE-LRU]
+extends = Fixed-LCE-LRU
+*.sensor[*].app[0].csMaxEntries = 20
+[Config B20-LeCaR]
+extends = LeCaR
+*.sensor[*].app[0].csMaxEntries = 20
+[Config B20-EXP3]
+extends = EXP3
+*.sensor[*].app[0].csMaxEntries = 20
+
+# ============== reversed regime order (flash, pollution, drift, stationary) ==============
+# Same four regimes and parameters, played backwards, to test order dependence.
+[Config Rev]
+abstract = true
+extends = ShadeBase
+*.regimeController.regimeNames = "flash pollution drift stationary"
+*.regimeController.zipfAlpha = "1.2 0.9 0.9 0.9"
+*.regimeController.rateScale = "2 1 1 1"
+*.regimeController.driftPeriod = "0 0 20 0"
+*.regimeController.driftStep = "0 0 -10 0"
+*.regimeController.attackRate = "0 3 0 0"
+*.regimeController.freshScale = "0.15 1 1 1"
+
+[Config Rev-SHADE]
+extends = Rev
+**.ndn.processor.selector = "shade"
+[Config Rev-Fixed-QL-LRU]
+extends = Rev
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 4
+[Config Rev-Fixed-DOOR-LRU]
+extends = Rev
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 3
+[Config Rev-Fixed-LCE-LRU]
+extends = Rev
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 0
+[Config Rev-Random]
+extends = Rev
+**.ndn.processor.selector = "random"
+[Config Rev-Static]
+extends = Rev
+**.ndn.processor.selector = "static"
+
+[Config B5-Random]
+extends = Random
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B20-Random]
+extends = Random
+*.sensor[*].app[0].csMaxEntries = 20
+[Config B5-DUCB]
+extends = DUCB
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B20-DUCB]
+extends = DUCB
+*.sensor[*].app[0].csMaxEntries = 20
+
+# ============== controls added after the second internal review ==============
+[Config Shuffle]
+description = "Control: switch exactly when SHADE would, but to a uniformly random other expert"
+extends = ShadeBase
+**.ndn.processor.selector = "shuffle"
+
+[Config Assigned]
+description = "Control: each node keeps, for the whole run, the expert SHADE used most at that node in the same seed (set per run with --**.ndn.processor.assignment)"
+extends = ShadeBase
+**.ndn.processor.selector = "assigned"
+
+[Config Rev-DRL]
+description = "Deep RL comparator (trained on the forward order) evaluated on the reversed regime order"
+extends = Rev
+*.rlBridge.mode = "infer"
+*.sensor[*].app[0].ndn.processorTypename = "ndniot.rlndn.RlNDNProcessor"
+*.sensor[*].app[0].ndn.csTypename = "ndniot.rlndn.RlCS"
+*.sensor[*].app[0].ndn.processor.placementPolicy = "rl"
+*.sensor[*].app[0].cacheReplacementPolicy = "RL"
+
+# ---------------------------------------------------------------------------
+# Round-3 review additions (all new behavior is off unless set here)
+# Held-pull bandits: each pull is kept banditHold epochs and rewarded without its
+# first (transition) epoch, on the fixed utility scale (u+beta)/(1+beta).
+[Config BanditHold]
+extends = ShadeBase
+**.ndn.processor.banditSkipFirst = true
+**.ndn.processor.banditFixedScale = true
+
+[Config Dev-EXP3H-h3]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "exp3"
+**.ndn.processor.banditHold = 3
+[Config Dev-EXP3H-h6]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "exp3"
+**.ndn.processor.banditHold = 6
+[Config Dev-EXP3H-h12]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "exp3"
+**.ndn.processor.banditHold = 12
+[Config Dev-DUCBH-h3-g090]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "ducb"
+**.ndn.processor.banditHold = 3
+**.ndn.processor.ducbGamma = 0.9
+[Config Dev-DUCBH-h6-g090]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "ducb"
+**.ndn.processor.banditHold = 6
+**.ndn.processor.ducbGamma = 0.9
+[Config Dev-DUCBH-h12-g090]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "ducb"
+**.ndn.processor.banditHold = 12
+**.ndn.processor.ducbGamma = 0.9
+[Config Dev-DUCBH-h3-g097]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "ducb"
+**.ndn.processor.banditHold = 3
+**.ndn.processor.ducbGamma = 0.97
+[Config Dev-DUCBH-h6-g097]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "ducb"
+**.ndn.processor.banditHold = 6
+**.ndn.processor.ducbGamma = 0.97
+[Config Dev-DUCBH-h12-g097]
+extends = BanditHold
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "ducb"
+**.ndn.processor.banditHold = 12
+**.ndn.processor.ducbGamma = 0.97
+# Discounted Hedge on the ghost utilities (full information, sampled choice)
+[Config Dev-Hedge-h3-e20]
+extends = ShadeBase
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 3
+**.ndn.processor.hedgeEta = 20
+[Config Dev-Hedge-h3-e100]
+extends = ShadeBase
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 3
+**.ndn.processor.hedgeEta = 100
+[Config Dev-Hedge-h6-e20]
+extends = ShadeBase
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 6
+**.ndn.processor.hedgeEta = 20
+[Config Dev-Hedge-h6-e100]
+extends = ShadeBase
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 6
+**.ndn.processor.hedgeEta = 100
+# Fixed comparators outside the portfolio: LCD, Prob(p), TinyLFU admission, all with LRU
+[Config FixedNew]
+extends = ShadeBase
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 0
+[Config Fixed-LCD-LRU]
+extends = FixedNew
+**.ndn.processor.experts = "LCD-LRU"
+[Config Dev-PROB-p01]
+extends = FixedNew
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.experts = "PROB-LRU"
+**.ndn.processor.probAdmit = 0.1
+[Config Dev-PROB-p03]
+extends = FixedNew
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.experts = "PROB-LRU"
+**.ndn.processor.probAdmit = 0.3
+[Config Dev-PROB-p05]
+extends = FixedNew
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.experts = "PROB-LRU"
+**.ndn.processor.probAdmit = 0.5
+[Config Dev-PROB-p07]
+extends = FixedNew
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.experts = "PROB-LRU"
+**.ndn.processor.probAdmit = 0.7
+[Config Dev-TLFU-s100]
+extends = FixedNew
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.experts = "TLFU-LRU"
+**.ndn.processor.tlfuSample = 100
+[Config Dev-TLFU-s1000]
+extends = FixedNew
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.experts = "TLFU-LRU"
+**.ndn.processor.tlfuSample = 1000
+# Cross-seed assignment control: majority expert per node over SHADE's dev runs
+# (seeds 0-4 of the selected setting, results/assigned_dev_majority.json), frozen for the evaluation seeds
+[Config AssignedDev]
+extends = ShadeBase
+**.ndn.processor.selector = "assigned"
+**.ndn.processor.assignment = "2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 4 2 2 2 2 2 4 2 2 2 2 2 4 2 2 2 2 3 0"
+# Drift-legacy control timeline: stationary, drift, stationary, stationary. The
+# shifted ranking persists after R2, so R3 and R4 are compared against windows
+# that carry the same drift legacy but no pollution or flash crowd.
+[Config CtrlD]
+abstract = true
+extends = Ctrl
+*.regimeController.driftPeriod = "0 20 0 0"
+*.regimeController.driftStep = "0 -10 0 0"
+[Config CtrlD-LCE-LRU]
+extends = CtrlD
+**.ndn.processor.fixedExpert = 0
+[Config CtrlD-LCE-LFUA]
+extends = CtrlD
+**.ndn.processor.fixedExpert = 1
+[Config CtrlD-FRESH-LFFO]
+extends = CtrlD
+**.ndn.processor.fixedExpert = 2
+[Config CtrlD-DOOR-LRU]
+extends = CtrlD
+**.ndn.processor.fixedExpert = 3
+[Config CtrlD-QL-LRU]
+extends = CtrlD
+**.ndn.processor.fixedExpert = 4
+[Config CtrlD-SHADE]
+extends = CtrlD
+**.ndn.processor.selector = "shade"
+# Profile-mismatch test: the compromised sensors move from the corners (0, 5, 30)
+# to 2, 14 and 27; the frozen assignment keeps the profile built for the corners.
+[Config Moved]
+abstract = true
+extends = ShadeBase
+*.sensor[0].app[0].consumer.attacker = false
+*.sensor[5].app[0].consumer.attacker = false
+*.sensor[30].app[0].consumer.attacker = false
+*.sensor[2].app[0].consumer.attacker = true
+*.sensor[14].app[0].consumer.attacker = true
+*.sensor[27].app[0].consumer.attacker = true
+[Config Moved-SHADE]
+extends = Moved
+**.ndn.processor.selector = "shade"
+[Config Moved-AssignedDev]
+extends = Moved
+**.ndn.processor.selector = "assigned"
+**.ndn.processor.assignment = "2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 4 2 2 2 2 2 4 2 2 2 2 2 4 2 2 2 2 3 0"
+[Config Moved-Fixed-DOOR-LRU]
+extends = Moved
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 3
+[Config Moved-Fixed-QL-LRU]
+extends = Moved
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 4
+# Dev-seed screening of rho and epoch length under the declared rule
+[Config Dev-rho080]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.discount = 0.8
+[Config Dev-rho095]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.discount = 0.95
+[Config Dev-rho098]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.discount = 0.98
+[Config Dev-epoch05]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.epoch = 5s
+[Config Dev-epoch20]
+extends = SHADE
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.epoch = 20s
+# Edge points of the round-3 dev grids (best setting sat at a grid corner)
+[Config Dev-Hedge-h1-e100]
+extends = ShadeBase
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 1
+**.ndn.processor.hedgeEta = 100
+[Config Dev-Hedge-h3-e300]
+extends = ShadeBase
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 3
+**.ndn.processor.hedgeEta = 300
+[Config Dev-Hedge-h3-e1000]
+extends = ShadeBase
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 3
+**.ndn.processor.hedgeEta = 1000
+[Config Dev-TLFU-s30]
+extends = FixedNew
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.experts = "TLFU-LRU"
+**.ndn.processor.tlfuSample = 30
+# Round-3 comparators on the evaluation seeds, settings chosen on seeds 0-4
+[Config EXP3-Held]
+extends = BanditHold
+**.ndn.processor.selector = "exp3"
+# round-5 screen on the gated code (results/tune6): H = 2 (the shortest hold that still
+# rewards an epoch) with beta = 1 did best on seeds 0-4 (45.94 vs 45.90 at beta = 6)
+**.ndn.processor.banditHold = 2
+**.ndn.processor.staleWeight = 1.0
+[Config Hedge]
+description = "Discounted Hedge on the ghost utilities (full information, sampled choice)"
+extends = ShadeBase
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 1
+**.ndn.processor.hedgeEta = 100
+[Config Fixed-TLFU-LRU]
+extends = FixedNew
+**.ndn.processor.experts = "TLFU-LRU"
+**.ndn.processor.tlfuSample = 30
+[Config Fixed-PROB-LRU]
+extends = FixedNew
+**.ndn.processor.experts = "PROB-LRU"
+**.ndn.processor.probAdmit = 0.5
+# Dev-seed screening of the stale weight beta under the declared rule
+[Config Dev-beta200]
+extends = SHADE
+**.ndn.processor.staleWeight = 2.0
+[Config Dev-beta400]
+extends = SHADE
+**.ndn.processor.staleWeight = 4.0
+[Config Dev-beta0600]
+extends = SHADE
+**.ndn.processor.staleWeight = 6.0
+[Config Dev-beta0800]
+extends = SHADE
+**.ndn.processor.staleWeight = 8.0
+[Config Dev-beta1200]
+extends = SHADE
+**.ndn.processor.staleWeight = 12.0
+[Config Dev-beta1600]
+extends = SHADE
+**.ndn.processor.staleWeight = 16.0
+[Config Dev-TLFU-s10]
+extends = FixedNew
+**.ndn.processor.staleWeight = 1.0   # first pass ran at beta = 1
+**.ndn.processor.phLambda = 0.5     # and lambda = 0.5
+**.ndn.processor.experts = "TLFU-LRU"
+**.ndn.processor.tlfuSample = 10
+# Second coordinate pass at beta = 6 (dev seeds 0-4, same rule)
+[Config DevB6]
+abstract = true
+extends = SHADE
+**.ndn.processor.staleWeight = 6.0
+[Config DevB6-lam025]
+extends = DevB6
+**.ndn.processor.phLambda = 0.25
+[Config DevB6-lam100]
+extends = DevB6
+**.ndn.processor.phLambda = 1.0
+[Config DevB6-hys000]
+extends = DevB6
+**.ndn.processor.hysteresis = 0
+[Config DevB6-hys010]
+extends = DevB6
+**.ndn.processor.hysteresis = 0.01
+[Config DevB6-rho095]
+extends = DevB6
+**.ndn.processor.discount = 0.95
+[Config DevB6-epoch05]
+extends = DevB6
+**.ndn.processor.epoch = 5s
+# Bandit and Hedge selectors at beta = 6 (each keeps the better of beta 1 and 6 on seeds 0-4)
+[Config DevB6-EXP3]
+extends = EXP3
+**.ndn.processor.staleWeight = 6.0
+[Config DevB6-DUCB]
+extends = DUCB
+**.ndn.processor.staleWeight = 6.0
+[Config DevB6-EXP3H]
+extends = EXP3-Held
+**.ndn.processor.staleWeight = 6.0
+[Config DevB6-Hedge]
+extends = Dev-Hedge-h1-e100
+**.ndn.processor.staleWeight = 6.0
+
+# ============== Round 4: strongest comparators at other store sizes and in reverse order ==============
+[Config B5-Hedge]
+extends = Hedge
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B20-Hedge]
+extends = Hedge
+*.sensor[*].app[0].csMaxEntries = 20
+[Config B5-AssignedDev]
+extends = AssignedDev
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B20-AssignedDev]
+extends = AssignedDev
+*.sensor[*].app[0].csMaxEntries = 20
+[Config B5-Fixed-TLFU-LRU]
+extends = Fixed-TLFU-LRU
+*.sensor[*].app[0].csMaxEntries = 5
+[Config B20-Fixed-TLFU-LRU]
+extends = Fixed-TLFU-LRU
+*.sensor[*].app[0].csMaxEntries = 20
+[Config Rev-Hedge]
+extends = Rev
+**.ndn.processor.selector = "hedge"
+**.ndn.processor.banditHold = 1
+**.ndn.processor.hedgeEta = 100
+[Config Rev-AssignedDev]
+extends = Rev
+**.ndn.processor.selector = "assigned"
+**.ndn.processor.assignment = "2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 4 2 2 2 2 2 4 2 2 2 2 2 4 2 2 2 2 3 0"
+[Config Rev-Fixed-TLFU-LRU]
+extends = Rev
+**.ndn.processor.selector = "fixed"
+**.ndn.processor.fixedExpert = 0
+**.ndn.processor.experts = "TLFU-LRU"
+**.ndn.processor.tlfuSample = 30

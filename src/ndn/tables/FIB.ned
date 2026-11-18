@@ -1,0 +1,40 @@
+//
+// NDN-IoT-RL - FIB NED Definition
+//
+
+package ndniot.ndn.tables;
+
+simple FIB
+{
+    parameters:
+        string staticRoutes = default("");  // "prefix:face:cost;..." for standalone topologies
+        @class(ndniot::FIB);
+        int maxSize = default(500);                     // Maximum FIB entries
+        bool enableDynamicRouting = default(true);       // Enable dynamic routing
+        double entryLifetime @unit(s) = default(0s);     // Entry lifetime (0 = infinite)
+        double cleanupInterval @unit(s) = default(5s);   // Cleanup interval
+
+        // Statistics
+        @signal[fibSize](type=long);
+        @signal[fibLookup](type=long);
+        @signal[fibUpdate](type=long);
+
+        @statistic[fibSize](record=vector,stats);
+        @statistic[fibLookup](record=count,sum);
+        @statistic[fibUpdate](record=count,sum);
+
+        // DP-IDS monitoring signals
+        @signal[fibRouteAddEvent](type=long);
+        @signal[fibRouteRemoveEvent](type=long);
+
+        @statistic[fibRouteAddEvent](record=count,vector);
+        @statistic[fibRouteRemoveEvent](record=count,vector);
+
+        @display("i=block/table2");
+
+    gates:
+        input in @loose;
+        output out @loose;
+        input processorIn @loose;   // Control messages from NDNProcessor
+        output processorOut @loose;  // Responses to NDNProcessor
+}

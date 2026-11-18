@@ -1,0 +1,10 @@
+out/
+results/
+*.o
+*.so
+__pycache__/
+*.pyc
+venv/
+*.sca
+*.vec
+*.vci

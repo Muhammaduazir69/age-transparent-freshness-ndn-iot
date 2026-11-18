@@ -1,0 +1,10 @@
+# NDN-IoT-RL extra build flags
+# ZeroMQ for the Python RL bridge (cppzmq header-only wrapper + libzmq)
+LDFLAGS += -lzmq -lrt
+CXXFLAGS += -std=c++17
+
+# --- absolute INET/Simu5G paths (IDE-regenerated-Makefile safety net,
+# same rationale as Simu5G-1.4.4/src/makefrag) ------------------------------
+NDNIOT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
+INCLUDE_PATH += -I$(NDNIOT_ROOT)/inet4.6/src -I$(NDNIOT_ROOT)/Simu5G-1.4.4/src
+LIBS += $(LDFLAG_LIBPATH)$(NDNIOT_ROOT)/inet4.6/src $(LDFLAG_LIBPATH)$(NDNIOT_ROOT)/Simu5G-1.4.4/src -lINET$(D) -lsimu5g$(D)

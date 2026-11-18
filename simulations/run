@@ -1,0 +1,23 @@
+#!/bin/bash
+# NDN-IoT-SHADE simulation launcher.
+# Usage: simulations/run -c <Config> [-r <run>] [extra opp options...]
+# Runs from simulations/configs so ini-relative paths (twotier.xml) resolve.
+
+set -e
+PROJ="$(cd "$(dirname "$0")/.." && pwd)"
+OMNETPP_ROOT="${OMNETPP_ROOT:-$(cd "$PROJ/../.." && pwd)}"
+INET="$PROJ/../inet4.6"
+S5G="$PROJ/../Simu5G-1.4.4"
+
+source "$OMNETPP_ROOT/setenv" -q 2>/dev/null || true
+export LD_LIBRARY_PATH="$INET/src:$S5G/src:$LD_LIBRARY_PATH"
+
+cd "$PROJ/simulations/configs"
+# binary may live in either layout: CLI (src/out/...) or IDE (out/.../src/)
+DEFAULT_BIN="$PROJ/out/clang-release/src/NDN-IoT-SHADE"
+[ -x "$DEFAULT_BIN" ] || DEFAULT_BIN="$PROJ/src/out/clang-release/NDN-IoT-SHADE"
+BIN="${SHADE_BIN:-$DEFAULT_BIN}"
+exec "$BIN" -u Cmdenv \
+    -n "$PROJ/src:$PROJ/simulations:$INET/src:$S5G/src" \
+    -l "$INET/src/INET" -l "$S5G/src/simu5g" \
+    "$@"
