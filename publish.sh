@@ -19,7 +19,10 @@ echo "== pre-push sweep =="
 if git log --format='%an <%ae>%n%B' | grep -qiE 'claude|anthropic|co-authored|🤖'; then
     echo "ABORT: attribution trailer found in the commit history"; exit 1
 fi
-if grep -rqiE 'gho_|ghp_|BEGIN [A-Z ]*PRIVATE KEY' . --exclude-dir=.git; then
+# --exclude the script: the pattern below is itself credential-shaped, and
+# without this the sweep matches its own source and refuses to ever publish.
+if grep -rqiE 'gho_|ghp_|BEGIN [A-Z ]*PRIVATE KEY' . --exclude-dir=.git \
+        --exclude="$(basename "$0")"; then
     echo "ABORT: a credential-shaped string is present"; exit 1
 fi
 echo "   commit history clean, no credentials"
