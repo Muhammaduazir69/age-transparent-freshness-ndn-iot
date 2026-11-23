@@ -2,7 +2,10 @@
 
 Simulator, scenarios, analysis pipeline and dataset for the manuscript
 *Age-Transparent Freshness: Bounding the Age of Cached Sensor Readings in
-NDN-Based IoT Networks*.
+NDN-Based IoT Networks*, submitted to *Discover Computing* (Springer Nature).
+
+Every number, table and figure in that manuscript is recomputed from recorded
+simulation output by the pipeline in `analysis/`; none is typed by hand.
 
 ## The problem, in one paragraph
 

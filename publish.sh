@@ -36,7 +36,7 @@ URL=$(gh repo view "$NAME" --json url -q .url)
 echo
 echo "published: $URL"
 echo
-echo "The manuscript's Data Availability statement names:"
+echo "The manuscript's Data availability statement names:"
 echo "   https://github.com/Muhammaduazir69/$NAME"
 echo "If the account or repository name differs from that, update the"
-echo "\\dataavailability{...} block in sensors_v2/main.tex and rebuild."
+echo "Data availability block in discover_computing/convert.py and rebuild."
