@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import campaign as C
-from make_results_figs import POLICY_PAIRS
+from make_results_figs import POLICY_PAIRS, POLICY_CITE
 
 _CACHE = {}
 
@@ -83,6 +83,8 @@ def tab_policies(d, out):
         if not ps or not pv:
             continue
         n_ok += 1
+        key = POLICY_CITE.get(name)
+        name = f"{name}~\\cite{{{key}}}" if key else name
         L.append(f"{name} & {100*ps[0]:.2f} & {100*ps[1]:.2f} & "
                  f"{ps[5]-ps[4]}/{ps[5]} & {100*pv[0]:.2f} & {100*pv[1]:.2f} & "
                  f"{pv[4]}/{pv[5]}\\\\")

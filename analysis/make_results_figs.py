@@ -21,7 +21,9 @@ def pr(d, a, b, m):
     x, y = cm(d, a), cm(d, b)
     return C.paired_runs(x, y, m) if x and y else None
 
-W_FULL, W_HALF = 6.3, 3.05
+# Sized so the tight-bbox output lands at the Springer measure of 372 pt and
+# the figure is placed at scale 1.000: a 7 pt label is then 7 pt on paper.
+W_FULL, W_HALF = 5.91, 2.86
 STD, ATC = "#c0392b", "#1a8f63"          # standard NDN, age-transparent
 MODEL = "#5a6673"
 REG_COL = {"stationary": "#2a78d6", "drift": "#7c4fc4",
@@ -178,6 +180,25 @@ POLICY_PAIRS = [
     ("Q-learning admission", "Fixed-QL-LRU", "AT-QL-LRU"),
     ("DQN + A2C", "DRL", "AT-DRL"),
 ]
+
+# Each baseline cited to the work that introduced it, for the results table.
+# The figures cannot carry these, because a cite key would be typeset as
+# literal text by the plotting library, so the map lives here and is used only
+# where LaTeX will resolve it. The Q-learning admission arm has no entry: it is
+# our own tabular-Q implementation and there is no paper to point at.
+POLICY_CITE = {
+    "LCE + LRU": "laoutaris2006lcd",
+    "LCD + LRU": "laoutaris2006lcd",
+    "LCE + aged LFU": "arlitt2000lfuda",
+    "LCE + LFF-origin": "meddeb2019lff",
+    "fresh-gated + LFF-origin": "meddeb2019lff",
+    "TinyLFU + LRU": "einziger2017tinylfu",
+    "door-gated + LRU": "einziger2017tinylfu",
+    "LeCaR": "vietri2018lecar",
+    "pCASTING": "hail2015pcasting",
+    "FDC admission": "amadeo2020transient",
+    "DQN + A2C": "mnih2015dqn,mnih2016a3c",
+}
 
 # Eleven standard-NDN points fall close together between 6% and 14% stale, and
 # a single fixed offset overprints three of the labels. These are placed by
