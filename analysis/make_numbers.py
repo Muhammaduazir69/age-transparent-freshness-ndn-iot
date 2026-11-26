@@ -373,6 +373,41 @@ def main(d, out):
         put("equivNVer", f"{sum(r[0] for r in _eqd):,}".replace(",", "{,}"))
         put("equivRunsVer", str(len(_eqd)))
         put("equivDiffVer", str(sum(r[1] for r in _eqd)))
+    # Build E made the annotation link-local, so a node that does not implement
+    # it neither honors nor relays it. Build F gave the annotation its true
+    # eight-byte size and added two counters per node, so its comparison has
+    # new scalars on one side; what matters there is that no shared value
+    # moved. Build G corrected comments only.
+    _eqe = [_equiv("equiv7", _c, _s)
+            for _c in ("Fixed-LCE-LRU", "AT-LCE-LRU", "ATD-LCE-LRU", "Fixed-FDCA-LRU")
+            for _s in (10, 11)]
+    _eqe = [r for r in _eqe if r]
+    if _eqe:
+        put("equivNLink", f"{sum(r[0] for r in _eqe):,}".replace(",", "{,}"))
+        put("equivRunsLink", str(len(_eqe)))
+        put("equivDiffLink", str(sum(r[1] for r in _eqe)))
+    # For the builds that add scalars, compare only the names both sides hold.
+    def _equiv_shared(sub, cfg, seed=10):
+        a = d / f"{cfg}-{seed}.sca"
+        b = d.parent / sub / f"{cfg}-{seed}.sca"
+        if not (a.exists() and b.exists()):
+            return None
+        def vals(path):
+            return {(m, n): v for m, n, v in C.read_scalars(path)}
+        va, vb = vals(a), vals(b)
+        shared = set(va) & set(vb)
+        if not shared:
+            return None
+        return len(shared), sum(1 for k in shared if va[k] != vb[k])
+    _eqf = [_equiv_shared(_s2, _c, _s3)
+            for _s2 in ("equiv8", "equiv9")
+            for _c in ("Fixed-LCE-LRU", "AT-LCE-LRU")
+            for _s3 in (10, 11)]
+    _eqf = [r for r in _eqf if r]
+    if _eqf:
+        put("equivNTlv", f"{sum(r[0] for r in _eqf):,}".replace(",", "{,}"))
+        put("equivRunsTlv", str(len(_eqf)))
+        put("equivDiffTlv", str(sum(r[1] for r in _eqf)))
 
     # --- is the depth gradient really monotone? ----------------------------
     # It was claimed to be "monotone in all four regimes". It is not: three of
@@ -518,7 +553,7 @@ def main(d, out):
             put(key + "Delta", f"{scale*q[2]:+.3f}")
 
     # The on-wire cost of the hop-by-hop annotation, measured rather than
-    # computed from the TLV size. Four bytes are charged where the annotation
+    # computed from the TLV size. The bytes are charged where the annotation
     # is first attached, so what matters is how often that happens over a run.
     def _bytes(cfg):
         tot = []
@@ -865,6 +900,17 @@ def main(d, out):
                     put(_tag + "EnergyPct", f"{100*_r2[2]/_r2[0]:+.1f}")
                 if _metric == "latency_ms" and _r2[0]:
                     put(_tag + "LatPct", f"{100*_r2[2]/_r2[0]:+.1f}")
+
+    # The size of the published dataset, counted from the result files rather
+    # than typed into the Data Availability statement, where it had gone stale
+    # by 180 runs.
+    _total = 0
+    for _sub in ("v2_main", "v2_cap5", "v2_cap20", "v2_field"):
+        _dd = d.parent / _sub
+        if _dd.is_dir():
+            _total += len(list(_dd.glob("*.sca"))) + len(list(_dd.glob("*.sca.gz")))
+    if _total:
+        put("datasetRuns", f"{_total:,}".replace(",", "{,}"))
 
     # Any macro the manuscript references but the campaign cannot yet supply
     # gets a loud sentinel rather than being omitted, so the document still

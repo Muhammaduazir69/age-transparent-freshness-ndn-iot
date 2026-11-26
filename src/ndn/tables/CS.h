@@ -145,16 +145,18 @@ protected:
     // relative to local arrival, so a copy stays servable for one full period
     // at each hop and the age a consumer sees grows with path length. With
     // this switch on, a node expires a copy at the end of the producer's
-    // lifetime instead, which is what a consumer's validity test means. It
-    // needs no new packet field and no synchronised clocks: a forwarder that
-    // subtracts the dwell time from FreshnessPeriod before sending carries the
-    // same information hop by hop (verified in the age-transparency check).
+    // lifetime instead, which is what a consumer's validity test means. The
+    // clock-free realization needs no synchronized clocks: a forwarder that
+    // subtracts the dwell time before sending carries the same information hop
+    // by hop. It does need somewhere to put that value, and it must not be
+    // FreshnessPeriod, which the producer signs; see residualFreshness in
+    // NdnPackets.msg and CS::annotateResidual.
     bool ageTransparent = false;
     // true selects the clock-free realization: keep the standard local TTL on
     // insertion, but hand the next hop what is left rather than a full period.
     bool ageDecrement = false;
     double lfuAgingTau = 60.0;   // aged-LFU decay constant (s)
-    int residualHeaderBytes = 4;  // TLV cost of the hop-by-hop annotation
+    int residualHeaderBytes = 8;  // TLV cost of the annotation; the NED parameter overrides this
 
     // Statistics
     int currentSize;

@@ -231,10 +231,12 @@ void CS::insertEntry(const std::string &name, DataPacket *data) {
     // modifies nothing in flight.
     //
     // The clock-free realization needs no such step and no shared clock. The
-    // residual lifetime arrives as a hop-by-hop annotation and the entry
-    // constructor has already used it, so the deadline is set. A copy that
-    // arrives without an annotation, from the publisher or from a node that
-    // does not implement the field, keeps the standard per-hop deadline.
+    // residual lifetime arrives as a hop-by-hop annotation, and it is honored
+    // here rather than in the entry constructor, because only here is the
+    // node's own mode known: a node that does not implement the field must
+    // ignore an arriving annotation, not act on it. A copy that arrives
+    // without one, from the publisher or from a node that does not implement
+    // the field, keeps the standard per-hop deadline.
     if (ageTransparent && !ageDecrement && entry->originExpiryTime > SIMTIME_ZERO)
         entry->expiryTime = entry->originExpiryTime;
     else if (ageTransparent && ageDecrement && data && data->getHasResidual()) {
