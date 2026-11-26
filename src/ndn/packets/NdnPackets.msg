@@ -84,12 +84,15 @@ packet DataPacket extends NdnPacket {
     // arrival time, so this counts the freshness re-stamps the copy has
     // collected and is the M of the staleness-amplification model.
     int restamps = 0;
-    // The lifetime the publisher declared, carried unmodified end to end. The
-    // clock-free realization rewrites freshnessPeriod at every cache so that
-    // it holds the residual lifetime, so the nominal value has to travel
-    // separately for the staleness test to stay on one basis. Nothing in the
-    // forwarding or caching path reads this field; the consumer uses it for
-    // measurement only.
+    // The lifetime the publisher declared, carried unmodified end to end.
+    // Kept as a separate field from the start, when the clock-free
+    // realization still rewrote freshnessPeriod in place and the nominal
+    // value had to travel apart from it. That rewrite is gone (it would have
+    // broken the producer's signature; see residualFreshness below), so this
+    // field now always equals freshnessPeriod. It is retained because the
+    // consumer's staleness test reads it, and reading one field that is
+    // guaranteed nominal is clearer than depending on nothing else having
+    // touched the other.
     simtime_t nominalFreshness = 0.0;
     // Hop-by-hop residual-lifetime annotation for the clock-free realization.
     // The producer's FreshnessPeriod sits inside MetaInfo and is therefore

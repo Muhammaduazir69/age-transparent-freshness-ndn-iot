@@ -33,11 +33,16 @@ simple CS like INdnCs
         // On-wire cost of the clock-free realization's hop-by-hop annotation.
         // The residual lifetime travels as an ignorable NDNLPv2 header field
         // beside the Data rather than inside its signed MetaInfo, so it adds
-        // its own TLV to the frame: one byte of type, one of length and a
-        // two-byte millisecond value. Charged once, where the annotation is
-        // first attached, so the energy and latency of the clock-free form
-        // include what carrying it costs.
-        int residualHeaderBytes @unit(B) = default(4B);
+        // its own type-length-value element to the frame. Sized from NDN's own
+        // encoding rules rather than guessed: the type is drawn from the
+        // ignorable block [800, 959], and NDN's VAR-NUMBER spends three octets
+        // on any number above 252, so TLV-TYPE is 3 bytes; TLV-LENGTH is 1,
+        // the value being short; and the value is a NonNegativeInteger of
+        // milliseconds, which at the 300 s lifetime class needs 4 bytes.
+        // Three plus one plus four is eight. Charged once, where the
+        // annotation is first attached, so the energy and latency of the
+        // clock-free form include what carrying it costs.
+        int residualHeaderBytes @unit(B) = default(8B);
         double lfuAgingTau @unit(s) = default(60s);  // aged-LFU decay constant
 
         @signal[csSize](type=long);

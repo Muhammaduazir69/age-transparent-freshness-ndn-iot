@@ -538,7 +538,32 @@ def main(d, out):
         put("DecBytesOrigin", f"{_bo/1e6:.2f}")
         put("DecBytesDecrement", f"{_bd/1e6:.2f}")
         put("DecBytesPct", f"{100*(_bd/_bo - 1):.2f}")
-        put("DecAnnotated", f"{(_bd - _bo)/4:,.0f}".replace(",", "{,}"))
+    # How many annotations were actually written, from the counter the Content
+    # Store records. This used to be derived by dividing the byte difference
+    # between the two arms by the TLV size, which is wrong twice over: the two
+    # arms are independent runs whose traffic differs by a couple of hundred
+    # packets, so the difference is not purely annotation bytes, and the
+    # quotient came out below the number of cache hits, which is a lower bound
+    # on the number of annotations.
+    def _counter(cfg, name):
+        tot = []
+        for _p in C.sca_files(d, cfg):
+            acc = 0.0
+            for _mod, _nm, _v in C.read_scalars(_p):
+                if _nm == name:
+                    try:
+                        acc += float(_v)
+                    except ValueError:
+                        pass
+            tot.append(acc)
+        import statistics as _sc
+        return _sc.mean(tot) if tot else None
+    _att = _counter("ATD-LCE-LRU", "annotationsAttached")
+    _chg = _counter("ATD-LCE-LRU", "annotationsCharged")
+    if _att:
+        put("DecAnnotated", f"{_att:,.0f}".replace(",", "{,}"))
+    if _chg:
+        put("DecAnnotatedCharged", f"{_chg:,.0f}".replace(",", "{,}"))
 
     # --- where the clock-free realization loses its small residue ----------
     # It cannot subtract the time a copy spends in flight, only the time it
@@ -611,7 +636,10 @@ def main(d, out):
                  ("Field-LCE-LFUA", "Field-AT-LCE-LFUA", "FieldLfua"),
                  ("Field-pCASTING", "Field-AT-pCASTING", "FieldPcast"),
                  ("Field-FDCA-LRU", "Field-AT-FDCA-LRU", "FieldFdc"))
-        gains, worst_at = [], 0.0
+        gains, worst_at, stds = [], 0.0, []
+        NICE = {"FieldLce": "leave-copy-everywhere", "FieldLcd": "leave-copy-down",
+                "FieldLfua": "aged LFU", "FieldPcast": "pCASTING",
+                "FieldFdc": "FDC admission"}
         for base, treat, tag in pairs:
             mb, mt = cm(fieldd, base), cm(fieldd, treat)
             if not (mb and mt):
@@ -621,6 +649,8 @@ def main(d, out):
                     pct(_s7.mean(v["stale_delivery"] for v in m.values())))
                 put(tag + suff + "Valid",
                     pct(_s7.mean(v["valid_cache_service"] for v in m.values())))
+            stds.append((NICE.get(tag, tag),
+                         100 * _s7.mean(v["stale_delivery"] for v in mb.values())))
             g = 100 * (_s7.mean(v["valid_cache_service"] for v in mt.values())
                        - _s7.mean(v["valid_cache_service"] for v in mb.values()))
             put(tag + "Gain", f"{g:.2f}")
@@ -630,6 +660,14 @@ def main(d, out):
         if gains:
             put("fieldGainMin", f"{min(gains):.2f}")
             put("fieldGainMax", f"{max(gains):.2f}")
+            # The range of standard-NDN staleness over the families in the
+            # table. Quoting two hand-picked arms excluded a third that sits
+            # below both of them.
+            if stds:
+                put("fieldStdStaleMin", f"{min(v for _, v in stds):.2f}")
+                put("fieldStdStaleMax", f"{max(v for _, v in stds):.2f}")
+                put("fieldStdStaleMinTag", min(stds, key=lambda kv: kv[1])[0])
+                put("fieldStdStaleMaxTag", max(stds, key=lambda kv: kv[1])[0])
             put("fieldWorstAtStale", f"{worst_at:.3f}")
             put("fieldPairs", str(len(gains)))
             nf = cm(fieldd, "Field-LCE-LRU")
@@ -768,6 +806,17 @@ def main(d, out):
         put("capMeanM" + _w, two(sum(k * v[0] for k, v in _t.items()) / _tot))
         if 1 in _t:
             put("capMeanW" + _w, two(_t[1][2]))
+        # The conclusion of Hypothesis 1 is about the mean delivered age, which
+        # is a different quantity from the stale-delivery rate the operational
+        # part of the section reports. restamp_table carries the mean age in
+        # units of the declared lifetime per hand-off bucket, so pooling it by
+        # delivery count gives E[A]/F at this capacity.
+        put("capMeanAge" + _w,
+            f"{sum(v[2] * v[0] for v in _t.values()) / _tot:.3f}")
+
+    # (5, 6) The field scenario's standard-NDN staleness range and the least
+    # affected family, over the pairs that are actually in the table rather
+    # than over two hand-picked ones.
 
     # --- versioned naming: the second no-protocol-change alternative --------
     # Consumers derive the version component from a schedule they share, which

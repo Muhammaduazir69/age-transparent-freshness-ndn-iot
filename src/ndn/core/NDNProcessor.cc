@@ -4,6 +4,7 @@
 //
 
 #include "NDNProcessor.h"
+#include "ndn/tables/CS.h"
 #include "NdnControlMessages_m.h"
 
 namespace ndniot {
@@ -379,6 +380,22 @@ void NDNProcessor::processData(DataPacket *data, int inFace) {
             emit(packetDroppedSignal, 1L);
             delete data;
             return;
+        }
+    }
+
+    // The residual-lifetime annotation is a link-local header field, so it
+    // reaches only the next hop and a node that does not implement it neither
+    // honors it nor relays it. Stripping it here is what makes that true in
+    // the model: a non-implementing node forwards the Data packet with the
+    // annotation removed, and the next hop therefore sees an unannotated copy
+    // and applies the standard per-hop rule. An implementing node leaves it
+    // in place, and re-derives it from its own residence time when it answers
+    // from its own store.
+    if (data->getHasResidual()) {
+        auto *localCs = dynamic_cast<CS *>(getParentModule()->getSubmodule("cs"));
+        if (localCs == nullptr || !localCs->carriesResidualAnnotation()) {
+            data->setHasResidual(false);
+            data->setResidualFreshness(SIMTIME_ZERO);
         }
     }
 

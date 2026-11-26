@@ -70,13 +70,14 @@ public:
             size = d->getContentLength();
             hopCount = d->getHopCount();
             if (d->getFreshnessPeriod() > 0) {
-                // Local deadline. The default is the standard per-hop rule:
-                // one full FreshnessPeriod from arrival here. A copy that
-                // arrived carrying a residual-lifetime annotation is held only
-                // for the life it has left, which is the clock-free rule.
-                expiryTime = simTime() + (d->getHasResidual()
-                                              ? d->getResidualFreshness()
-                                              : d->getFreshnessPeriod());
+                // Local deadline, the standard per-hop rule: one full
+                // FreshnessPeriod from arrival here. A node that implements
+                // age transparency overrides this in CS::insertEntry, which is
+                // where the mode is known. A node that does not implement it
+                // keeps this deadline whatever the arriving packet carries,
+                // because an ignorable link-local header field is ignored by a
+                // receiver that does not understand it.
+                expiryTime = simTime() + d->getFreshnessPeriod();
                 // The publisher's deadline, from the lifetime the producer
                 // signed. FreshnessPeriod is never rewritten in flight, so
                 // this is the same quantity under every realization.
@@ -165,6 +166,8 @@ protected:
     int totalExpired;
     int expiredFirstEvictions = 0;   // tier-1 sweeps that found a victim
     int csLookupsDisabled = 0;       // lookups answered while the store is off
+    long annotationsAttached = 0;    // residual annotations written on a served copy
+    long annotationsCharged = 0;     // those that paid the TLV's bytes (first attach)
 
     // Cleanup
     cMessage *cleanupTimer;
@@ -193,6 +196,14 @@ protected:
     bool sweepExpiredOnce();
     // Attach the hop-by-hop residual-lifetime annotation to an outgoing copy.
     void annotateResidual(DataPacket *served, const CSEntry *entry);
+
+public:
+    // True when this node implements the hop-by-hop annotation. A link-local
+    // header field is not relayed by a node that does not understand it, so
+    // the forwarder asks the store before passing a Data packet on.
+    bool carriesResidualAnnotation() const { return ageTransparent && ageDecrement; }
+
+protected:
 
     // Replacement policies
     virtual void evictLRU();
@@ -285,9 +296,7 @@ public:
         return total > 0 ? (double)totalHits / total : 0.0;
     }
 
-    // DP-IDS Penalisation API (Section 4.5)
-    void reduceFreshness(const std::string &name, double factor);
-    void bypassVehicleEntries(const std::string &vehicleId);
+
 
     // --- Expected-utility (TARA) scoring -------------------------------
     // U(i) = lambda_i * R_i * c_i: decayed local request rate, true residual

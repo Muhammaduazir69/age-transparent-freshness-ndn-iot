@@ -89,6 +89,8 @@ void CS::finish() {
     recordScalar("expiredFirstEvictions", expiredFirstEvictions);
     recordScalar("csLookupsDisabled", csLookupsDisabled);
     recordScalar("hitRatio", getHitRatio());
+    recordScalar("annotationsAttached", annotationsAttached);
+    recordScalar("annotationsCharged", annotationsCharged);
 
     EV_DEBUG << "CS statistics: hits=" << totalHits
             << ", misses=" << totalMisses
@@ -210,8 +212,11 @@ void CS::annotateResidual(DataPacket *served, const CSEntry *entry) {
     // An expired entry is never served (the lookup drops it first), so the
     // residual is strictly positive here.
     const simtime_t residual = entry->expiryTime - simTime();
-    if (!served->getHasResidual())      // charge the TLV once, where it is attached
+    annotationsAttached++;
+    if (!served->getHasResidual()) {    // charge the TLV once, where it is attached
         served->setByteLength(served->getByteLength() + residualHeaderBytes);
+        annotationsCharged++;
+    }
     served->setHasResidual(true);
     served->setResidualFreshness(residual > SIMTIME_ZERO ? residual : SIMTIME_ZERO);
 }
@@ -232,6 +237,19 @@ void CS::insertEntry(const std::string &name, DataPacket *data) {
     // does not implement the field, keeps the standard per-hop deadline.
     if (ageTransparent && !ageDecrement && entry->originExpiryTime > SIMTIME_ZERO)
         entry->expiryTime = entry->originExpiryTime;
+    else if (ageTransparent && ageDecrement && data && data->getHasResidual()) {
+        // Honor the annotation, clamped at the lifetime the publisher signed.
+        // The clamp costs one comparison and never binds in honest operation,
+        // because a residual is what is left of F and so cannot exceed it. It
+        // is what makes the security ceiling of Sec. 4.3 true rather than
+        // merely plausible: a neighbor that inflates the annotation can buy a
+        // copy a full declared period at this hop, which is exactly standard
+        // NDN, and cannot buy more.
+        simtime_t r = data->getResidualFreshness();
+        if (r < SIMTIME_ZERO) r = SIMTIME_ZERO;
+        const simtime_t f = data->getFreshnessPeriod();
+        entry->expiryTime = simTime() + (r < f ? r : f);
+    }
     entries[name] = entry;
     lruList.push_front(name);
 
@@ -622,38 +640,6 @@ void CS::handleInsertRequest(CSInsertRequest *request) {
     delete request;
 }
 
-void CS::reduceFreshness(const std::string &name, double factor) {
-    factor = std::max(0.0, std::min(1.0, factor));  // Clamp to [0, 1]
-    CSEntry *entry = findEntry(name);
-    if (entry && entry->data) {
-        double origFreshness = entry->data->getFreshnessPeriod().dbl();
-        double newFreshness = origFreshness * factor;
-        entry->data->setFreshnessPeriod(SimTime(newFreshness));
-        // Recalculate expiry based on reduced freshness
-        if (newFreshness > 0) {
-            entry->expiryTime = entry->insertionTime + SimTime(newFreshness);
-        } else {
-            entry->expiryTime = simTime(); // Expire immediately
-        }
-        EV_DEBUG << "DP-IDS: Reduced freshness for " << name
-                << " by factor " << factor << endl;
-    }
-}
 
-void CS::bypassVehicleEntries(const std::string &vehicleId) {
-    std::vector<std::string> toRemove;
-    for (const auto &entry : entries) {
-        // Check if this entry was signed by the suspicious vehicle
-        if (entry.second->data &&
-            std::string(entry.second->data->getSignerId()) == vehicleId) {
-            toRemove.push_back(entry.first);
-        }
-    }
-    for (const std::string &name : toRemove) {
-        EV_DEBUG << "DP-IDS: Bypassing CS entry " << name
-                << " from vehicle " << vehicleId << endl;
-        removeEntry(name);
-    }
-}
 
 } // namespace ndniot

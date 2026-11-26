@@ -109,8 +109,10 @@ def tab_fdc(d, out):
          r"so each is run alone and both together, paired by seed over \NSeeds{} "
          r"seeds with everything else fixed. The last row replaces FDC's expiry "
          r"realization with the clock-free one of "
-         r"Section~\ref{sec:method:clockfree}, marked $^{*}$, which needs neither "
-         r"a synchronized clock nor a change to the signed Data packet}",
+         r"Section~\ref{sec:method:clockfree}, marked $^{*}$. The asterisk governs "
+         r"the expiry column only: that half then needs no clock and leaves the "
+         r"signed Data packet untouched, while FDC's admission rule still reads "
+         r"the publisher's timestamp, so the row as a whole is not clock-free}",
          r"\label{tab:fdc}",
          r"\begin{adjustwidth}{-\extralength}{0cm}",
          r"\begin{tabularx}{\fulllength}{L{4.0cm} c c c c c c c}",

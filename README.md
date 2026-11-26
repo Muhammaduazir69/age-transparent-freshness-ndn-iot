@@ -46,9 +46,21 @@ realization. `origin` reads the publisher's deadline from the packet's
 generation time, which is FDC's route and needs a common time base.
 `decrement` carries the residual lifetime in its own hop-by-hop annotation
 (`hasResidual` and `residualFreshness` in `NdnPackets.msg`), modelling an
-ignorable NDNLPv2 header field, and charges its four bytes to the frame through
-`residualHeaderBytes`. The signed `FreshnessPeriod` is never rewritten under
-either mode.
+ignorable NDNLPv2 header field, and charges its eight bytes to the frame
+through `residualHeaderBytes`. Eight is the real TLV size, not an estimate: a
+type drawn from the ignorable block [800, 959] takes three octets under NDN's
+VAR-NUMBER rule, the length takes one, and a millisecond value large enough for
+the 300 s lifetime class takes four. The signed `FreshnessPeriod` is never
+rewritten under either mode.
+
+Two properties of the annotation are enforced in the code rather than only
+argued for in the paper. It is link-local: a node that does not implement it
+neither honors it nor relays it, which `NDNProcessor::processData` effects by
+stripping the field. And an honored residual is clamped at the lifetime the
+publisher signed, so a forged annotation can buy a copy at most one full
+declared period at the next hop, which is what standard NDN already gives. The
+Content Store records `annotationsAttached` and `annotationsCharged` so the
+on-wire cost is counted rather than inferred.
 
 The FDC baseline lives in `src/shade/ShadeNDNProcessor.cc`, as the `FDC`
 admission rule, implementing Equations (2) to (4) of that paper with the
