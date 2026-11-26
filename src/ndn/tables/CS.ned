@@ -30,6 +30,14 @@ simple CS like INdnCs
         //               before forwarding, so the packet carries the residual
         //               lifetime and no clock has to be shared
         string ageMode = default("origin");
+        // On-wire cost of the clock-free realization's hop-by-hop annotation.
+        // The residual lifetime travels as an ignorable NDNLPv2 header field
+        // beside the Data rather than inside its signed MetaInfo, so it adds
+        // its own TLV to the frame: one byte of type, one of length and a
+        // two-byte millisecond value. Charged once, where the annotation is
+        // first attached, so the energy and latency of the clock-free form
+        // include what carrying it costs.
+        int residualHeaderBytes @unit(B) = default(4B);
         double lfuAgingTau @unit(s) = default(60s);  // aged-LFU decay constant
 
         @signal[csSize](type=long);

@@ -70,7 +70,16 @@ public:
             size = d->getContentLength();
             hopCount = d->getHopCount();
             if (d->getFreshnessPeriod() > 0) {
-                expiryTime = simTime() + d->getFreshnessPeriod();
+                // Local deadline. The default is the standard per-hop rule:
+                // one full FreshnessPeriod from arrival here. A copy that
+                // arrived carrying a residual-lifetime annotation is held only
+                // for the life it has left, which is the clock-free rule.
+                expiryTime = simTime() + (d->getHasResidual()
+                                              ? d->getResidualFreshness()
+                                              : d->getFreshnessPeriod());
+                // The publisher's deadline, from the lifetime the producer
+                // signed. FreshnessPeriod is never rewritten in flight, so
+                // this is the same quantity under every realization.
                 simtime_t origin = d->getOriginTime() > SIMTIME_ZERO
                                        ? d->getOriginTime() : simTime();
                 originExpiryTime = origin + d->getFreshnessPeriod();
@@ -144,6 +153,7 @@ protected:
     // insertion, but hand the next hop what is left rather than a full period.
     bool ageDecrement = false;
     double lfuAgingTau = 60.0;   // aged-LFU decay constant (s)
+    int residualHeaderBytes = 4;  // TLV cost of the hop-by-hop annotation
 
     // Statistics
     int currentSize;
@@ -181,6 +191,8 @@ protected:
     void cleanupExpiredEntries();
     // Tier-1 sweep shared by every policy; returns true if it evicted.
     bool sweepExpiredOnce();
+    // Attach the hop-by-hop residual-lifetime annotation to an outgoing copy.
+    void annotateResidual(DataPacket *served, const CSEntry *entry);
 
     // Replacement policies
     virtual void evictLRU();

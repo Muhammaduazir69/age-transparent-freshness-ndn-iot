@@ -21,7 +21,7 @@
 
 namespace ndniot {
 
-enum class Admission { LCE, FRESH, DOOR, QL, LCD, PROB, TLFU, TARA, PCAST };
+enum class Admission { LCE, FRESH, DOOR, QL, LCD, PROB, TLFU, TARA, PCAST, FDC };
 enum class Eviction { LRU, LFUA, LFFO, TARA, TARA_ADD };
 
 enum GhostOutcome { GHOST_MISS = 0, GHOST_VALID = 1, GHOST_STALE = 2 };

@@ -44,6 +44,11 @@ class ShadeNDNProcessor : public RlNDNProcessor {
         // per-regime counters (ghost) for the fidelity analysis
         std::vector<long> rValid, rStale;
         std::vector<long> rActiveEpochs;
+        // Freshness-Driven Caching (Amadeo et al., Sensors 2020) keeps an
+        // exponentially weighted moving average of the residual freshness
+        // periods it has seen and uses it as the admission threshold.
+        // Negative until the first Data packet is observed.
+        double fdcTh = -1.0;
     };
     std::vector<Expert> experts;
     int active = 0;
@@ -99,6 +104,7 @@ class ShadeNDNProcessor : public RlNDNProcessor {
     double hedgeEta = 50;
     // fixed comparators outside the portfolio
     double probAdmit = 0.5;
+    double fdcBeta = 0.125;        // FDC threshold EWMA weight
     int lcdHops = 1;
     int tlfuSample = 1000;
     long tlfuSeen = 0;
@@ -136,8 +142,8 @@ class ShadeNDNProcessor : public RlNDNProcessor {
     void observeData(const DataPacket *data, bool decideForReal);
     int recentCount(const std::string &name, simtime_t now);
     int qState(const std::string &name, const DataPacket *data, simtime_t now);
-    bool admitBy(const Expert &x, const std::string &name, const DataPacket *data,
-                 simtime_t now, int &qs);
+    bool admitBy(Expert &x, const std::string &name, const DataPacket *data,
+                 simtime_t now, int &qs, bool forReal);
     void qLearn(int s, int a, double r);
     void endEpoch();
     void activate(int k);

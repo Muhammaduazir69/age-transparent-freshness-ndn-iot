@@ -91,6 +91,15 @@ packet DataPacket extends NdnPacket {
     // forwarding or caching path reads this field; the consumer uses it for
     // measurement only.
     simtime_t nominalFreshness = 0.0;
+    // Hop-by-hop residual-lifetime annotation for the clock-free realization.
+    // The producer's FreshnessPeriod sits inside MetaInfo and is therefore
+    // inside the signed portion of a Data packet, so a forwarder cannot
+    // rewrite it. This pair models an ignorable NDNLPv2 LpHeaderField carried
+    // beside the Data instead: hasResidual says the annotation is present,
+    // residualFreshness holds the life the copy has left. The Data packet,
+    // its MetaInfo and its signature are never modified.
+    bool hasResidual = false;
+    simtime_t residualFreshness = 0.0;
 }
 
 //

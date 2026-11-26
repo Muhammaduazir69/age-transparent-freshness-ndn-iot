@@ -34,6 +34,7 @@ void ShadeNDNProcessor::parseExperts(const std::string &spec, int capacity, doub
         else if (a == "TLFU") x.adm = Admission::TLFU;
         else if (a == "TARA") x.adm = Admission::TARA;
         else if (a == "PCAST") x.adm = Admission::PCAST;
+        else if (a == "FDC") x.adm = Admission::FDC;
         else throw cRuntimeError("SHADE: unknown admission rule '%s'", a.c_str());
         if (e == "LRU") x.ev = Eviction::LRU;
         else if (e == "LFUA") x.ev = Eviction::LFUA;
@@ -101,6 +102,7 @@ void ShadeNDNProcessor::initialize() {
         if (x.adm == Admission::TLFU) needTlfu = true;
     for (auto &x : experts)
         if (x.adm == Admission::TARA || x.adm == Admission::PCAST) needTara = true;
+    fdcBeta = par("fdcBeta").doubleValue();
     pcastWb = par("pcastWb").doubleValue();
     pcastWo = par("pcastWo").doubleValue();
     pcastWf = par("pcastWf").doubleValue();
@@ -203,8 +205,9 @@ void ShadeNDNProcessor::qLearn(int s, int a, double r) {
     qUpdates++;
 }
 
-bool ShadeNDNProcessor::admitBy(const Expert &x, const std::string &name,
-                                const DataPacket *data, simtime_t now, int &qs) {
+bool ShadeNDNProcessor::admitBy(Expert &x, const std::string &name,
+                                const DataPacket *data, simtime_t now, int &qs,
+                                bool forReal) {
     qs = -1;
     switch (x.adm) {
         case Admission::LCE:
@@ -255,6 +258,44 @@ bool ShadeNDNProcessor::admitBy(const Expert &x, const std::string &name,
             double pc = (pcastWb * bhat + pcastWo * (1.0 - ohat) + pcastWf * fhat) / wsum;
             return uniform(0, 1) < pc;
         }
+        case Admission::FDC: {
+            // Freshness-Driven Caching, Amadeo et al., Sensors 2020, Sec. 5.4.
+            // The node computes the residual freshness period of the arriving
+            // copy from the lifetime the producer declared and the generation
+            // timestamp the producer carries,
+            //     RFP = FP + timestamp - currentTime                    (their Eq. 2)
+            // and caches it with probability
+            //     Pc = 1                 if RFP >= Th
+            //        = RFP / Th          otherwise                      (their Eq. 3)
+            // where Th is an exponentially weighted moving average of the
+            // residual periods the node has seen,
+            //     Th <- (1 - beta) Th + beta RFP,   beta = 0.125        (their Eq. 4)
+            // updated after every caching decision regardless of its outcome.
+            // The intent is to spend slots on long-lived copies, since
+            // short-lived ones are evicted again almost at once.
+            //
+            // The threshold has no value before the first Data packet is
+            // seen, so the first copy is admitted and seeds the average.
+            // Only a real decision moves the average: this function is also
+            // called to keep the shadow caches of the inactive policies, and
+            // counting those would advance the estimate several times per
+            // packet.
+            simtime_t fp = data->getFreshnessPeriod();
+            double rfp = 0.0;
+            if (fp > SIMTIME_ZERO) {
+                rfp = (data->getOriginTime() + fp - now).dbl();
+                if (rfp < 0) rfp = 0;
+            }
+            bool admit;
+            if (x.fdcTh <= 0)
+                admit = true;
+            else
+                admit = rfp >= x.fdcTh || uniform(0, 1) < rfp / x.fdcTh;
+            if (forReal)
+                x.fdcTh = x.fdcTh < 0 ? rfp
+                                      : (1.0 - fdcBeta) * x.fdcTh + fdcBeta * rfp;
+            return admit;
+        }
         case Admission::TARA: {
             // Admit when the candidate's expected return beats the weakest
             // resident's. The candidate enters with the same unit rate credit
@@ -280,7 +321,7 @@ void ShadeNDNProcessor::observeData(const DataPacket *data, bool decideForReal) 
     for (size_t k = 0; k < experts.size(); k++) {
         Expert &x = experts[k];
         int qs = -1;
-        bool admit = admitBy(x, name, data, now, qs);
+        bool admit = admitBy(x, name, data, now, qs, decideForReal);
         pendingAdmit[k] = admit ? 1 : 0;
         if (x.ghost.containsFresh(name, now))
             continue;

@@ -215,7 +215,7 @@ def main(d, out):
         _POL = ["Fixed-LCE-LRU", "Fixed-LCD-LRU", "Fixed-LCE-LFUA",
                 "Base-LCE-LFFO", "Fixed-FRESH-LFFO", "Fixed-TLFU-LRU",
                 "Fixed-DOOR-LRU", "LeCaR", "Base-pCASTING", "Fixed-QL-LRU",
-                "DRL"]
+                "DRL", "Fixed-FDCA-LRU"]
         _rises, _ratios = [], []
         for _c in _POL:
             _a, _b = cm(_cap5, _c), cm(_cap20, _c)
@@ -240,7 +240,8 @@ def main(d, out):
             # the named freshness-aware policy's own pair, so the sentence that
             # cites it is not quoting a minimum taken over a different arm
             for _c, _tag in (("Base-LCE-LFFO", "capGridLffo"),
-                             ("Fixed-FRESH-LFFO", "capGridFresh")):
+                             ("Fixed-FRESH-LFFO", "capGridFresh"),
+                             ("Fixed-FDCA-LRU", "capGridFdc")):
                 _r = [r for r in _rises if r[0] == _c]
                 if _r:
                     put(_tag + "Five", f"{_r[0][1]:.2f}")
@@ -322,9 +323,9 @@ def main(d, out):
     # the usual "built once" guarantee, which was not true of this campaign.
     # These macros count the recorded values that matched, so the sentence
     # cannot drift away from the check.
-    def _equiv(sub, cfg):
-        a = d / f"{cfg}-10.sca"
-        b = d.parent / sub / f"{cfg}-10.sca"
+    def _equiv(sub, cfg, seed=10):
+        a = d / f"{cfg}-{seed}.sca"
+        b = d.parent / sub / f"{cfg}-{seed}.sca"
         if not (a.exists() and b.exists()):
             return None
         def vals(path):
@@ -347,6 +348,31 @@ def main(d, out):
             _eq.append(_r)
     if _eq:
         put("equivDiffTotal", str(sum(r[1] for r in _eq)))
+
+    # Build C adds the FDC admission rule and moves the clock-free realization's
+    # residual lifetime out of the signed FreshnessPeriod and into its own
+    # hop-by-hop annotation. Both additions default to build B's behavior on
+    # every configuration that does not name them, which is a claim about the
+    # recorded values rather than about the diff, so it is tested the same way.
+    _eqc = [_equiv("equiv5", _c, _s)
+            for _c in ("Fixed-LCE-LRU", "AT-LCE-LRU") for _s in (10, 11)]
+    _eqc = [r for r in _eqc if r]
+    if _eqc:
+        put("equivNFdc", f"{sum(r[0] for r in _eqc):,}".replace(",", "{,}"))
+        put("equivRunsFdc", str(len(_eqc)))
+        put("equivDiffFdc", str(sum(r[1] for r in _eqc)))
+    # Build D changes only how a reading's freshness class is read out of its
+    # name, which is the same parse for every name reported before the
+    # versioned arm. The FDC configuration is included because build C's
+    # additions are reachable only from it.
+    _eqd = [_equiv("equiv6", _c, _s)
+            for _c in ("Fixed-LCE-LRU", "AT-LCE-LRU", "Fixed-FDCA-LRU")
+            for _s in (10, 11)]
+    _eqd = [r for r in _eqd if r]
+    if _eqd:
+        put("equivNVer", f"{sum(r[0] for r in _eqd):,}".replace(",", "{,}"))
+        put("equivRunsVer", str(len(_eqd)))
+        put("equivDiffVer", str(sum(r[1] for r in _eqd)))
 
     # --- is the depth gradient really monotone? ----------------------------
     # It was claimed to be "monotone in all four regimes". It is not: three of
@@ -491,6 +517,29 @@ def main(d, out):
             put(key + "Decrement", f"{scale*q[1]:.2f}")
             put(key + "Delta", f"{scale*q[2]:+.3f}")
 
+    # The on-wire cost of the hop-by-hop annotation, measured rather than
+    # computed from the TLV size. Four bytes are charged where the annotation
+    # is first attached, so what matters is how often that happens over a run.
+    def _bytes(cfg):
+        tot = []
+        for _p in C.sca_files(d, cfg):
+            acc = 0.0
+            for _mod, _nm, _v in C.read_scalars(_p):
+                if _nm == "ndnBytesSent":
+                    try:
+                        acc += float(_v)
+                    except ValueError:
+                        pass
+            tot.append(acc)
+        import statistics as _sb
+        return _sb.mean(tot) if tot else None
+    _bo, _bd = _bytes("AT-LCE-LRU"), _bytes("ATD-LCE-LRU")
+    if _bo and _bd:
+        put("DecBytesOrigin", f"{_bo/1e6:.2f}")
+        put("DecBytesDecrement", f"{_bd/1e6:.2f}")
+        put("DecBytesPct", f"{100*(_bd/_bo - 1):.2f}")
+        put("DecAnnotated", f"{(_bd - _bo)/4:,.0f}".replace(",", "{,}"))
+
     # --- where the clock-free realization loses its small residue ----------
     # It cannot subtract the time a copy spends in flight, only the time it
     # spends resident, so one transit of error accrues per hand-off. If that
@@ -560,7 +609,8 @@ def main(d, out):
         pairs = (("Field-LCE-LRU", "Field-AT-LCE-LRU", "FieldLce"),
                  ("Field-LCD-LRU", "Field-AT-LCD-LRU", "FieldLcd"),
                  ("Field-LCE-LFUA", "Field-AT-LCE-LFUA", "FieldLfua"),
-                 ("Field-pCASTING", "Field-AT-pCASTING", "FieldPcast"))
+                 ("Field-pCASTING", "Field-AT-pCASTING", "FieldPcast"),
+                 ("Field-FDCA-LRU", "Field-AT-FDCA-LRU", "FieldFdc"))
         gains, worst_at = [], 0.0
         for base, treat, tag in pairs:
             mb, mt = cm(fieldd, base), cm(fieldd, treat)
@@ -598,6 +648,174 @@ def main(d, out):
         put("taraService", pct(_st7.mean(v["cache_service"] for v in _tm.values())))
         put("taraStale", pct(_st7.mean(v["stale_delivery"] for v in _tm.values())))
         put("taraSeeds", str(len(_tm)))
+
+    # --- FDC: the two halves run apart -------------------------------------
+    # Amadeo et al. (2020) fasten a probabilistic admission rule to the
+    # residual-lifetime expiry rule and evaluate the pair. The four cells here
+    # separate them: standard NDN, the expiry rule alone, the admission rule
+    # alone, and both together, which is FDC as published.
+    import statistics as _s10
+    _FDC = (("Std", "Fixed-LCE-LRU"), ("At", "AT-LCE-LRU"),
+            ("Adm", "Fixed-FDCA-LRU"), ("Full", "AT-FDCA-LRU"),
+            ("Dec", "ATD-FDCA-LRU"))
+    _cells = {}
+    for _tag, _cfg in _FDC:
+        _m = cm(d, _cfg)
+        if not _m:
+            continue
+        _cells[_tag] = _m
+        put("fdc" + _tag + "Stale", pct(_s10.mean(v["stale_delivery"] for v in _m.values())))
+        put("fdc" + _tag + "Valid", pct(_s10.mean(v["valid_cache_service"] for v in _m.values())))
+        put("fdc" + _tag + "Hit", pct(_s10.mean(v["cache_service"] for v in _m.values())))
+        put("fdc" + _tag + "Energy", one(_s10.mean(v["energy_J"] for v in _m.values())))
+        put("fdc" + _tag + "Lat", one(_s10.mean(v["latency_ms"] for v in _m.values())))
+        put("fdc" + _tag + "Seeds", str(len(_m)))
+    # Attribution. Of the staleness FDC removes against standard NDN, what
+    # share does each half account for when run on its own?
+    if {"Std", "Adm", "Full"} <= set(_cells):
+        def _sm(t):
+            return _s10.mean(v["stale_delivery"] for v in _cells[t].values())
+        _tot = _sm("Std") - _sm("Full")
+        if _tot > 0:
+            put("fdcAdmShare", f"{100*(_sm('Std') - _sm('Adm'))/_tot:.0f}\\%")
+            put("fdcExpShare", f"{100*(_sm('Adm') - _sm('Full'))/_tot:.0f}\\%")
+    # Paired comparisons, same seeds, one factor apart in each case.
+    for _a, _b, _tag in (("Fixed-LCE-LRU", "Fixed-FDCA-LRU", "fdcAdmVsStd"),
+                         ("Fixed-FDCA-LRU", "AT-FDCA-LRU", "fdcFullVsAdm"),
+                         ("AT-LCE-LRU", "AT-FDCA-LRU", "fdcFullVsAt"),
+                         ("AT-FDCA-LRU", "ATD-FDCA-LRU", "fdcDecVsFull")):
+        for _metric, _mt in (("stale_delivery", "Stale"),
+                             ("valid_cache_service", "Valid"),
+                             ("cache_service", "Hit"),
+                             ("energy_J", "Energy")):
+            _q = pr(d, _a, _b, _metric)
+            if _q:
+                _sc = 100 if _metric != "energy_J" else 1
+                put(_tag + _mt + "Delta", f"{_sc*_q[2]:+.2f}")
+                put(_tag + _mt + "Wins", f"{_q[4]}/{_q[5]}")
+
+    # Satisfaction, the admission acceptance rate and the transmitted-frame
+    # count, which is what the energy difference between the cells is made of.
+    def _sumscalars(cfg, names):
+        acc = {n: [] for n in names}
+        for _p in C.sca_files(d, cfg):
+            tot = {n: 0.0 for n in names}
+            for _mod, _nm, _v in C.read_scalars(_p):
+                if _nm in tot:
+                    try:
+                        tot[_nm] += float(_v)
+                    except ValueError:
+                        pass
+            for n in names:
+                acc[n].append(tot[n])
+        return {n: (_s10.mean(v) if v else None) for n, v in acc.items()}
+
+    _FR = ("nbTxFrames", "admissionsOffered", "admissionsAccepted",
+           "ndnPacketsSent", "pitInsertionEvent:count", "csMiss:count",
+           "csHit:count", "totalInsertions", "totalEvictions")
+    _frames = {}
+    for _tag, _cfg in _FDC:
+        if _tag not in _cells:
+            continue
+        _t = _sumscalars(_cfg, _FR)
+        _frames[_tag] = _t
+        put("fdc" + _tag + "Sat",
+            pct(_s10.mean(v["satisfaction"] for v in _cells[_tag].values())))
+        if _t.get("admissionsOffered"):
+            put("fdc" + _tag + "Admit",
+                one(100 * _t["admissionsAccepted"] / _t["admissionsOffered"]))
+    # Where the energy difference between the cells comes from, measured rather
+    # than reasoned about. Each quantity is reported as a percentage change
+    # against standard NDN, which is the cell the energy baseline belongs to.
+    _COUNTER = {"nbTxFrames": "FramesPct", "ndnPacketsSent": "PktsPct",
+                "pitInsertionEvent:count": "PitPct", "csMiss:count": "MissPct",
+                "csHit:count": "HitsPct", "totalInsertions": "InsPct",
+                "totalEvictions": "EvictPct"}
+    if "Std" in _frames:
+        for _tag in _frames:
+            for _nm, _suf in _COUNTER.items():
+                _b = _frames["Std"].get(_nm)
+                _v = _frames[_tag].get(_nm)
+                if _b and _v:
+                    put("fdc" + _tag + _suf, f"{100*(_v/_b - 1):+.2f}")
+            # hits each admitted copy goes on to serve, which is what the
+            # admission rule is trying to raise
+            _i, _h = _frames[_tag].get("totalInsertions"), _frames[_tag].get("csHit:count")
+            _bi, _bh = _frames["Std"].get("totalInsertions"), _frames["Std"].get("csHit:count")
+            if _i and _h and _bi and _bh:
+                put("fdc" + _tag + "HitsPerInsPct",
+                    f"{100*((_h/_i)/(_bh/_bi) - 1):+.1f}")
+    # the acceptance rate the FDC admission arm actually ran at
+    if "Adm" in _frames and _frames["Adm"].get("admissionsOffered"):
+        put("fdcAdmitRate",
+            one(100 * _frames["Adm"]["admissionsAccepted"]
+                / _frames["Adm"]["admissionsOffered"]))
+
+    # --- the two premises of the capacity hypothesis, in their mean form ----
+    # Hypothesis 1 needs the mean residence time and the hand-off count both
+    # to rise with capacity. Neither is assumed: the hand-off count is the
+    # mean of the recorded M distribution, and the residence mean is read off
+    # the one-hand-off deliveries exactly as the calibration does.
+    for _cap, _cfg in ((5, "C5-LCE-LRU"), (10, "Fixed-LCE-LRU"),
+                       (20, "C20-LCE-LRU"), (40, "C40-LCE-LRU")):
+        _t = C.restamp_table(d, _cfg)[0]
+        if not _t:
+            continue
+        _tot = sum(v[0] for v in _t.values())
+        if _tot <= 0:
+            continue
+        _w = {5: "Five", 10: "Ten", 20: "Twenty", 40: "Forty"}[_cap]
+        put("capMeanM" + _w, two(sum(k * v[0] for k, v in _t.items()) / _tot))
+        if 1 in _t:
+            put("capMeanW" + _w, two(_t[1][2]))
+
+    # --- versioned naming: the second no-protocol-change alternative --------
+    # Consumers derive the version component from a schedule they share, which
+    # is the first of the two name-discovery routes of Sec. 5.3.
+    for _cfg, _tag in (("Ver30-LCE-LRU", "VerThirty"),
+                       ("Ver90-LCE-LRU", "VerNinety"),
+                       ("Fixed-LCE-LRU", "VerBase"),
+                       ("AT-LCE-LRU", "VerRule")):
+        _m = cm(d, _cfg)
+        if not _m:
+            continue
+        put(_tag + "Stale", pct(_s10.mean(v["stale_delivery"] for v in _m.values())))
+        put(_tag + "Valid", pct(_s10.mean(v["valid_cache_service"] for v in _m.values())))
+        put(_tag + "Hit", pct(_s10.mean(v["cache_service"] for v in _m.values())))
+        put(_tag + "Energy", one(_s10.mean(v["energy_J"] for v in _m.values())))
+        put(_tag + "Lat", one(_s10.mean(v["latency_ms"] for v in _m.values())))
+        put(_tag + "Seeds", str(len(_m)))
+        # Where the residue sits. Versioned naming bounds delivered age by the
+        # version interval rather than by the declared lifetime, so it should
+        # hold in the three regimes whose lifetimes are at least the interval
+        # and fail in the flash regime, which shortens them. Measured per
+        # regime rather than argued.
+        for _r, _nm in ((3, "Flash"),):
+            _vals = [C.run_metrics(_p, regimes=(_r,)) for _p in C.sca_files(d, _cfg)]
+            _vals = [v for v in _vals if v]
+            if _vals:
+                put(_tag + _nm,
+                    pct(_s10.mean(v["stale_delivery"] for v in _vals)))
+        _q = [C.run_metrics(_p, regimes=(0, 1, 2)) for _p in C.sca_files(d, _cfg)]
+        _q = [v for v in _q if v]
+        if _q:
+            put(_tag + "Quiet", pct(_s10.mean(v["stale_delivery"] for v in _q)))
+    for _cfg, _tag in (("Ver30-LCE-LRU", "VerThirty"), ("Ver90-LCE-LRU", "VerNinety")):
+        for _metric, _mt in (("stale_delivery", "Stale"),
+                             ("valid_cache_service", "Valid"),
+                             ("cache_service", "Hit"),
+                             ("energy_J", "Energy"),
+                             ("latency_ms", "Lat")):
+            _r2 = pr(d, "Fixed-LCE-LRU", _cfg, _metric)
+            if _r2:
+                _sc = 100 if _metric in ("stale_delivery", "valid_cache_service",
+                                         "cache_service") else 1
+                put(_tag + _mt + "Delta", f"{_sc*_r2[2]:+.2f}")
+                put(_tag + _mt + "Wins", f"{_r2[4]}/{_r2[5]}")
+                if _metric == "energy_J" and _r2[0]:
+                    put(_tag + "EnergyPct", f"{100*_r2[2]/_r2[0]:+.1f}")
+                if _metric == "latency_ms" and _r2[0]:
+                    put(_tag + "LatPct", f"{100*_r2[2]/_r2[0]:+.1f}")
 
     # Any macro the manuscript references but the campaign cannot yet supply
     # gets a loud sentinel rather than being omitted, so the document still

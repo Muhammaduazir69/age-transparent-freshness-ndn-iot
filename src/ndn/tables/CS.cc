@@ -40,6 +40,7 @@ void CS::initialize() {
 
     expiredFirst = par("expiredFirst");
     ageTransparent = par("ageTransparent");
+    residualHeaderBytes = (int)par("residualHeaderBytes").intValue();
     const std::string ageModeStr = par("ageMode").stdstringValue();
     if (ageModeStr == "decrement") ageDecrement = true;
     else if (ageModeStr == "origin") ageDecrement = false;
@@ -164,7 +165,11 @@ DataPacket* CS::lookup(const std::string &name) {
     emit(csHitRatioSignal, getHitRatio());
 
     EV_DEBUG << "Cache HIT: " << name << endl;
-    return entry->data->dup();
+    DataPacket *served = entry->data->dup();
+    served->setRestamps(entry->data->getRestamps() + 1);
+    if (ageTransparent && ageDecrement)
+        annotateResidual(served, entry);
+    return served;
 }
 
 bool CS::contains(const std::string &name) {
@@ -187,14 +192,44 @@ CSEntry* CS::findEntry(const std::string &name) {
     return (it != entries.end()) ? it->second : nullptr;
 }
 
+void CS::annotateResidual(DataPacket *served, const CSEntry *entry) {
+    // Clock-free age transparency. The next cache will restart its freshness
+    // timer from its own arrival time whatever we do, so the correction is
+    // applied here, where the residence time is known locally: tell the next
+    // hop how much life the copy has left instead of letting it assume a full
+    // period. HTTP solves the same problem the same way with the Age header
+    // (RFC 9111 Sec. 4.2).
+    //
+    // The value does NOT go into FreshnessPeriod. That field lives in the
+    // Data packet's MetaInfo, which the producer's signature covers, so
+    // rewriting it would invalidate the signature and change the implicit
+    // digest. It travels instead as a hop-by-hop annotation beside the Data,
+    // in the manner of an ignorable NDNLPv2 header field, and the Data packet
+    // itself is forwarded untouched.
+    //
+    // An expired entry is never served (the lookup drops it first), so the
+    // residual is strictly positive here.
+    const simtime_t residual = entry->expiryTime - simTime();
+    if (!served->getHasResidual())      // charge the TLV once, where it is attached
+        served->setByteLength(served->getByteLength() + residualHeaderBytes);
+    served->setHasResidual(true);
+    served->setResidualFreshness(residual > SIMTIME_ZERO ? residual : SIMTIME_ZERO);
+}
+
 void CS::insertEntry(const std::string &name, DataPacket *data) {
     CSEntry *entry = new CSEntry(name, data);
     // Age-transparent mode: the entry expires when the reading does, not one
-    // FreshnessPeriod after this node happened to receive it. The origin
-    // realization reads the publisher's deadline off the packet. The
-    // clock-free realization needs no such step: FreshnessPeriod already
-    // holds the residual lifetime, so the standard local TTL computed by the
-    // entry constructor is the right deadline.
+    // FreshnessPeriod after this node happened to receive it.
+    //
+    // The timestamp realization reads the publisher's deadline off the
+    // packet's signed generation time, which requires a common time base but
+    // modifies nothing in flight.
+    //
+    // The clock-free realization needs no such step and no shared clock. The
+    // residual lifetime arrives as a hop-by-hop annotation and the entry
+    // constructor has already used it, so the deadline is set. A copy that
+    // arrives without an annotation, from the publisher or from a node that
+    // does not implement the field, keeps the standard per-hop deadline.
     if (ageTransparent && !ageDecrement && entry->originExpiryTime > SIMTIME_ZERO)
         entry->expiryTime = entry->originExpiryTime;
     entries[name] = entry;
@@ -506,10 +541,8 @@ void CS::handleLookupRequest(CSLookupRequest *request) {
         // HTTP solves the same problem the same way with the Age header
         // (RFC 9111 Sec. 4.2). An expired entry is never served (the lookup
         // above drops it), so the residual is strictly positive here.
-        if (ageTransparent && ageDecrement) {
-            const simtime_t residual = entry->expiryTime - simTime();
-            served->setFreshnessPeriod(residual > SIMTIME_ZERO ? residual : SIMTIME_ZERO);
-        }
+        if (ageTransparent && ageDecrement)
+            annotateResidual(served, entry);
         response->setData(dynamic_cast<cMessage*>(served));
 
         EV_DEBUG << "Cache HIT: " << name << " (hits=" << totalHits

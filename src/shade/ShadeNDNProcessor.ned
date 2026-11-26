@@ -32,6 +32,10 @@ simple ShadeNDNProcessor extends RlNDNProcessor
         bool banditFixedScale = default(false);    // reward (u+beta)/(1+beta) instead of running range
         double hedgeEta = default(50);             // hedge: learning rate on G_k/W
         double probAdmit = default(0.5);           // PROB admission probability (Prob(p))
+        // Freshness-Driven Caching (Amadeo et al., Sensors 2020): weight of
+        // the newest observation in the moving average that sets the
+        // admission threshold. 0.125 is the value the authors use.
+        double fdcBeta = default(0.125);
         int lcdDepth = default(1);                 // LCD: admit at this many hops below the hit
         int tlfuSample = default(1000);            // TLFU: Interests between halvings of the counts
         double pcastWb = default(1.0);             // pCASTING: battery weight

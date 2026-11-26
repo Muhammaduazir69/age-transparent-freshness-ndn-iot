@@ -52,12 +52,25 @@ void NdnProducerApp::handleMessage(cMessage *msg) {
 simtime_t NdnProducerApp::ttlFor(const char *name) const {
     if (freshnessClasses.empty())
         return freshnessPeriod;
-    // content index = trailing digits of the name ("/wsn/area0/item17" -> 17);
-    // class = index % numClasses
+    // Content index, which fixes the content's freshness class. The index is
+    // the number following the last "item" component of the name, so a name
+    // that carries a trailing version component still maps to the item it
+    // names: "/campus/env/item17" and "/campus/env/item17/v5" are both item
+    // 17. Names with no "item" component, such as the compromised sensors'
+    // junk, fall back to the trailing digits, which is what every name
+    // reported before the versioned arm was added resolved to anyway.
     size_t len = strlen(name);
-    size_t i = len;
-    while (i > 0 && isdigit((unsigned char)name[i - 1])) i--;
-    long idx = (i < len) ? atol(name + i) : 0;
+    long idx = 0;
+    const char *last = nullptr;
+    for (const char *q = name; (q = strstr(q, "item")) != nullptr; q += 4)
+        last = q;
+    if (last != nullptr && isdigit((unsigned char)last[4])) {
+        idx = atol(last + 4);
+    } else {
+        size_t i = len;
+        while (i > 0 && isdigit((unsigned char)name[i - 1])) i--;
+        idx = (i < len) ? atol(name + i) : 0;
+    }
     size_t k = (size_t)((idx % (long)freshnessClasses.size() +
                          (long)freshnessClasses.size()) %
                         (long)freshnessClasses.size());

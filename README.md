@@ -20,6 +20,16 @@ measurement of that effect and a rule that removes it: a node expires a cached
 copy at the publisher's deadline rather than one lifetime after its own
 arrival.
 
+That rule is not new. Freshness-Driven Caching (Amadeo et al., *Sensors* 2020,
+20(7), 1985) reaches the same expiry from a producer timestamp and clocks
+synchronized to a satellite time source, and FDC is implemented here as a
+baseline so that its two halves, a probabilistic admission rule and the expiry
+rule, can be run apart and attributed. What this repository adds is a
+realization of the expiry rule that a constrained sensing node can run: the
+residual lifetime travels hop by hop as an ignorable link-local annotation, so
+no two clocks are compared and nothing inside the signed portion of the Data
+packet is modified.
+
 ## Layout
 
 | path | contents |
@@ -31,10 +41,33 @@ arrival.
 | `data/` | the per-run dataset the manuscript is reduced from |
 
 The change the paper proposes lives in `src/ndn/tables/CS.{h,cc,ned}`. It is
-small on purpose: `ageTransparent` selects it, and `ageMode` chooses between the
-two realizations, one reading the publisher's deadline from the packet and one
-carrying the residual lifetime in the existing `FreshnessPeriod` field so that
-no clocks need to agree.
+small on purpose: `ageTransparent` selects it and `ageMode` chooses the
+realization. `origin` reads the publisher's deadline from the packet's
+generation time, which is FDC's route and needs a common time base.
+`decrement` carries the residual lifetime in its own hop-by-hop annotation
+(`hasResidual` and `residualFreshness` in `NdnPackets.msg`), modelling an
+ignorable NDNLPv2 header field, and charges its four bytes to the frame through
+`residualHeaderBytes`. The signed `FreshnessPeriod` is never rewritten under
+either mode.
+
+The FDC baseline lives in `src/shade/ShadeNDNProcessor.cc`, as the `FDC`
+admission rule, implementing Equations (2) to (4) of that paper with the
+authors' threshold weight of 0.125. Select it with
+`**.ndn.processor.experts = "FDC-LRU"`.
+
+| configuration | what it is |
+|---|---|
+| `Fixed-LCE-LRU` | standard NDN, leave-copy-everywhere with LRU |
+| `AT-LCE-LRU` | the expiry rule, timestamp realization |
+| `ATD-LCE-LRU` | the expiry rule, clock-free realization |
+| `Fixed-FDCA-LRU` | FDC's admission rule on the standard per-hop expiry |
+| `AT-FDCA-LRU` | FDC as published, both halves |
+| `ATD-FDCA-LRU` | FDC's admission rule on the clock-free expiry |
+| `Ver30-LCE-LRU`, `Ver90-LCE-LRU` | versioned naming, 30 and 90 s version intervals |
+| `Short2/3/4-LCE-LRU` | a publisher under-declaring the lifetime by 2, 3 and 4 |
+| `Half-AT-LCE-LRU`, `Half-ATD-LCE-LRU` | the rule at half the field |
+| `C5/C20/C40-*` | the Content Store capacity sweep |
+| `Field-*` | the second scenario, every node publishing |
 
 ## Requirements
 
@@ -66,7 +99,7 @@ contains no placeholder.
 ## Dataset
 
 `data/` holds the reduction behind every reported number: one row per
-simulation run across all 1300 runs, plus the hand-off and hop-distance
+simulation run across all 1480 runs, plus the hand-off and hop-distance
 breakdowns the mechanism sections rest on. See `data/README.md` for the schema
 and the denominator conventions. The raw OMNeT++ scalar files are 5.4 GB and
 are available from the authors.

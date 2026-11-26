@@ -174,6 +174,7 @@ POLICY_PAIRS = [
     ("door-gated + LRU", "Fixed-DOOR-LRU", "AT-DOOR-LRU"),
     ("LeCaR", "LeCaR", "AT-LeCaR"),
     ("pCASTING", "Base-pCASTING", "AT-pCASTING"),
+    ("FDC admission", "Fixed-FDCA-LRU", "AT-FDCA-LRU"),
     ("Q-learning admission", "Fixed-QL-LRU", "AT-QL-LRU"),
     ("DQN + A2C", "DRL", "AT-DRL"),
 ]
@@ -189,6 +190,7 @@ LABEL_NUDGE = {
     "LCE + LFF-origin":     (7, 5, "left"),
     "fresh-gated + LFF":    (7, -9, "left"),
     "TinyLFU + LRU":        (2, 7, "left"),
+    "FDC admission":        (7, 4, "left"),
     "door-gated + LRU":     (-4, -10, "right"),
     "pCASTING":             (-6, 4, "right"),
     "Q-learning admission": (6, 4, "left"),
