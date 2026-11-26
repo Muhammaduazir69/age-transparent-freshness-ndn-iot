@@ -51,70 +51,92 @@ if bad_refs:
 # absent. Treating both as "must be present" is what made an earlier run of
 # this check report five false failures. The sentence around the quote says
 # which kind it is.
-REMOVED = re.compile(
-    # Stems, not whole words: a trailing \b after "contradict" fails to match
-    # "contradicted", which is how two quotations of removed wording were
-    # misreported as missing from the manuscript.
-    r"\b(previous\w*|former\w*|used to|no longer|remov\w*|delet\w*|replac\w*|"
-    r"retract\w*|earlier draft|old version|had said|had written|first draft|"
-    r"was wrong|is false|did not support|contradict\w*|overstat\w*|correct\w*|"
-    r"now reads|it now says|instead reads)", re.I)
-# the letter transliterates display math and config strings; those are not
-# prose quotations and the manuscript renders them differently
-SKIP = re.compile(r"<-|\\|^[A-Za-z_]+ = |experts =|ageMode|residualHeaderBytes")
+# A response letter quotes three kinds of text and they are checked three ways.
+# Inferring the kind from the surrounding prose was tried and abandoned: a
+# marker-word heuristic classified "all of them \"the first knob...\"" as a
+# removal and could not handle one sentence quoting both the old wording and
+# the new. The kind is therefore declared here. The lists are short, they live
+# next to the letter, and a quotation that leaves one of them changes the
+# check's verdict, which is the point.
+#
+# OLD_WORDING  wording the revision removed: must be ABSENT from the manuscript
+# EXTERNAL     quoted from another paper or a specification: not our text
+# everything else                                    must be PRESENT
+OLD_WORDING = [
+    "raw hit ratio can only fall",
+    "least affected policy",
+    "receive no stale readings at all",
+    "the admission half carries its own cost in cache service while the expiry half does not",
+    "Sections 6.7 to 6.5",
+    "5 and twenty entries",
+    "fresh-gated + LFF",
+    "the first measurement of staleness amplification",
+    "to our knowledge the first NDN Content Store rule that enforces a validity bound on the publisher's clock",
+]
+# quoted from another source, or a formulation coined in this letter rather
+# than taken from the manuscript
+EXTERNAL = [
+    "is static, i.e., it is not decreased by caching nodes when answering requests",
+    "strict synchronization with the Coordinated Universal Time",
+    "all vehicles maintain strict synchronization with the Coordinated Universal Time (UTC) that can be acquired from the Global Navigation Support System",
+    "based in low-income countries",
+    "prefer the journal's own printing to an index",
+]
+# identifiers, config strings and transliterated display math are not prose
+SKIP = re.compile(r"<-|\\|^[A-Za-z_]+ = |experts =|ageMode|residualHeaderBytes|"
+                  r"RFP = |e <- ")
 
 def quoted_spans(text):
-    """Double-quoted spans, plus backtick spans taken by splitting on backticks.
+    """Quotations, found by splitting on each delimiter and taking odd pieces.
 
-    Matching backtick pairs with a regex mis-pairs them when a sentence holds
-    several: the span between one code fragment's closing tick and the next
-    one's opening tick gets captured as if it were a quotation. Splitting and
-    taking the odd pieces cannot make that mistake.
+    Pairing delimiters with a regex mis-pairs adjacent quotations: the text
+    between one closing mark and the next opening mark is captured as though it
+    were itself a quotation.
     """
-    out = [(m.group(1), m.start(1)) for m in re.finditer(r'"([^"\n]{18,140})"', text)]
-    pos, parts = 0, text.split("`")
-    for i, part in enumerate(parts):
-        if i % 2 == 1 and 18 <= len(part) <= 140 and "\n" not in part:
-            out.append((part, pos))
-        pos += len(part) + 1
+    out = []
+    for delim in ('"', "`"):
+        pos, parts = 0, text.split(delim)
+        for k, part in enumerate(parts):
+            if k % 2 == 1 and 18 <= len(part) <= 160 and "\n" not in part:
+                out.append((part, pos))
+            pos += len(part) + len(delim)
     return out
 
-def sentence_around(text, i):
-    """The clause holding position i, plus the clause before it.
+def listed(q, lst):
+    """Exact match after whitespace normalization.
 
-    A removal marker often sits in the preceding sentence ("The previous
-    version argued that ... 'quote'"), so one clause is too narrow. Sentence
-    boundaries are also found with a period that is followed by whitespace, or
-    a semicolon: splitting on any period cuts a clause in half at a section
-    number like 6.8.
+    Substring matching in either direction conflates a renamed label with its
+    old form: "fresh-gated + LFF" sits inside "fresh-gated + LFF-origin", so a
+    containment test declared the new name removed.
     """
-    bounds = [m.end() for m in re.finditer(r"(?:[.;]\s|\n)", text[:i])]
-    a = bounds[-2] if len(bounds) >= 2 else (bounds[0] if bounds else 0)
-    m = re.search(r"(?:[.;]\s|\n)", text[i:])
-    b = i + m.start() if m else len(text)
-    return text[a:b]
+    qn = re.sub(r"\s+", " ", q).strip().strip(".,;:").lower()
+    return any(qn == re.sub(r"\s+", " ", x).strip().lower() for x in lst)
 
 spans = quoted_spans(L)
-missing_q, lingering_q, skipped_q = [], [], 0
+missing_q, lingering_q, skipped_q, external_q = [], [], 0, 0
 for q, i in spans:
     qn = re.sub(r"\s+", " ", q).strip().strip(".,;:")
-    if (not qn or not qn[0].isalnum() or re.fullmatch(r"[\w./\\{}()+\-]+", qn)
-            or SKIP.search(qn)):
+    if not qn or not qn[0].isalnum() or re.fullmatch(r"[\w./\\{}()+\-]+", qn) \
+            or SKIP.search(qn):
         skipped_q += 1
         continue
-    should_be_gone = bool(REMOVED.search(sentence_around(L, i)))
-    present = qn in P
-    if should_be_gone and present:
-        lingering_q.append(qn)
-    elif not should_be_gone and not present:
+    if listed(qn, EXTERNAL):
+        external_q += 1
+        continue
+    present = qn in P or qn.lower() in P.lower()
+    if listed(qn, OLD_WORDING):
+        if present:
+            lingering_q.append(qn)
+    elif not present:
         missing_q.append(qn)
-print(f"quoted phrases: {len(spans)} found, {skipped_q} are identifiers or math,")
+print(f"quoted phrases: {len(spans)} found, {skipped_q} identifiers or math, "
+      f"{external_q} quoted from other sources")
 print(f"   {len(missing_q)} claimed-present but absent, "
-      f"{len(lingering_q)} claimed-removed but still present")
+      f"{len(lingering_q)} declared-removed but still present")
 for q in missing_q:
-    print("   MISSING:", q[:110])
+    print("   MISSING:", q[:120])
 for q in lingering_q:
-    print("   STILL THERE:", q[:110])
+    print("   STILL THERE:", q[:120])
 if missing_q:
     fail.append(("quote-missing", missing_q))
 if lingering_q:

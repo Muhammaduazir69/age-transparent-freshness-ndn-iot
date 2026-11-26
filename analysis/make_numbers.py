@@ -823,6 +823,16 @@ def main(d, out):
         put("fdcAdmitRate",
             one(100 * _frames["Adm"]["admissionsAccepted"]
                 / _frames["Adm"]["admissionsOffered"]))
+    # pCASTING's acceptance rate, for the contrast that matters in Sec. 2.2:
+    # it admits about as selectively as FDC and yet raises staleness, so the
+    # difference is which copies each one keeps rather than how many.
+    _pc = _sumscalars("Base-pCASTING", ("admissionsOffered", "admissionsAccepted"))
+    if _pc.get("admissionsOffered"):
+        put("pcastAdmitRate",
+            one(100 * _pc["admissionsAccepted"] / _pc["admissionsOffered"]))
+    _pcm = cm(d, "Base-pCASTING")
+    if _pcm:
+        put("pcastHitShare", pct(_s10.mean(v["cache_service"] for v in _pcm.values())))
 
     # --- the two premises of the capacity hypothesis, in their mean form ----
     # Hypothesis 1 needs the mean residence time and the hand-off count both
@@ -900,6 +910,33 @@ def main(d, out):
                     put(_tag + "EnergyPct", f"{100*_r2[2]/_r2[0]:+.1f}")
                 if _metric == "latency_ms" and _r2[0]:
                     put(_tag + "LatPct", f"{100*_r2[2]/_r2[0]:+.1f}")
+
+    # Word forms of the small counts that appear in prose. The sweep's ends were
+    # written as numerals while the capacities in between were spelled out, so a
+    # sentence read "5 and twenty entries". One convention per position:
+    # capacities are words in prose and numerals in tables.
+    _WORD = {2: "two", 3: "three", 4: "four", 5: "five", 10: "ten", 20: "twenty",
+             40: "forty"}
+    for _name in ("capMin", "capMax", "depthRegimes", "depthReversals",
+                  "NCapacities"):
+        if _name in M:
+            try:
+                M[_name + "Word"] = _WORD[int(M[_name])]
+            except (ValueError, KeyError):
+                pass
+
+    # How many builds the campaign spans, counted from the pin file rather than
+    # written into a sentence, where it had drifted to six against seven
+    # pinned.
+    _pin = d.parent / "BINARY_PIN.txt"
+    if _pin.is_file():
+        import re as _rp
+        _md5 = set(_rp.findall(r"^([0-9a-f]{32})", _pin.read_text(), _rp.M))
+        if _md5:
+            _w = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
+                  7: "seven", 8: "eight", 9: "nine", 10: "ten"}
+            put("NBuilds", _w.get(len(_md5), str(len(_md5))))
+            put("NBuildsNum", str(len(_md5)))
 
     # The size of the published dataset, counted from the result files rather
     # than typed into the Data Availability statement, where it had gone stale
