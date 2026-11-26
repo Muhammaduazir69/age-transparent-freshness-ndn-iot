@@ -103,6 +103,11 @@ cd python && python3 -m shade.run_matrix \
 analysis/regen.sh <results_dir>
 ```
 
+`analysis/verify_refs.py` checks every bibliography entry against Crossref,
+Semantic Scholar and OpenAlex on title, year, first author, author count and
+page range; `verification/references.md` is the recorded result, including the
+one page range the check found wrong and the four flags it resolved.
+
 `analysis/regen.sh` also runs the checks the manuscript depends on: that no ini
 assignment was silently ignored, that no result file is a truncated stub, that
 no quantity the pipeline computes is left unreported, and that the rendered PDF
