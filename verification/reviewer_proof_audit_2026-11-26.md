@@ -234,3 +234,64 @@ something, the per-round count fell from four code defects to eight prose and
 artifact defects, and the last of them was found by reading the paper rather
 than by any check here. The gates establish what was checked and how; they do
 not establish completeness, and this sign-off should not be read as claiming it.
+
+---
+
+## Addendum, 27 November 2026: the math prescreen, and what it did not resolve
+
+`math_lint.py` (M1 to M26) was run for the first time on this manuscript. It
+started at 8 MAJOR and ends at 3. The five that were resolved were resolved by
+changing the paper, not the gate.
+
+| gate | what it wanted | what changed |
+|---|---|---|
+| M3 | an equation labelled and never referenced | the reward equation, added last round and never cited, is now referenced where its two channels are discussed |
+| M7 | complexity for the algorithm box | $O(1)$ per admission and per hand-off, $O(1)$ state per entry, stated in Section 4.4 |
+| M8 | confidence intervals | the statistics table reported only $p$ and Holm $p$ for twelve policies. It now leads with the Hodges-Lehmann median paired difference and its distribution-free interval, read off the same exact signed-rank null distribution |
+| M9 | recent works compared | the five 2025 and 2026 schemes are cited in the results, at the paragraph that says why the baselines are the canonical scheme per mechanism class |
+| M15 | a link layer in the system model | Section 3.1 now states the link abstraction, what a hop costs, and the two consequences that matter, instead of naming the radio and moving on |
+
+### The three left standing, and why
+
+1. **M20, a 30 to 35 reference budget.** That is a Transactions page-limit
+   budget. Discover Computing publishes no reference limit, and the supervisor's
+   tenth comment asked for a reference to be added. Declined.
+2. **M23, a constraint-violation rate for the RL method.** The learned agent
+   here is a baseline we compare against, not the proposed method, and it
+   optimizes an unconstrained reward. There is no constraint to violate.
+   Declined.
+3. **M25, Doppler in a satellite ISAC paper.** This is not a satellite paper.
+   The gate fires on the words "satellite" and "LEO", which occur in the
+   related-work discussion of age-driven caching over a constellation and in
+   the expansion of GNSS. Verified by inspection: 8 occurrences of "satellite",
+   none in the system model. Declined as a misclassification.
+
+One MINOR is also declined on purpose. **M16** asks for three to five
+theorem-like results and the paper has two. The third would have to be
+manufactured, and the supervisor's fifth comment went the other way: it asked
+for the former Proposition 2 to stop being stated as a proved result. Adding
+theorems to clear a lint would undo that. The one result added this round,
+Proposition 2 on the adversarial ceiling, was added because it is provable from
+the algorithm in four lines and because it states a security guarantee the
+paper had only in prose, not to raise a count.
+
+### A literature check that found nothing, which is the useful outcome
+
+Because the supervisor's first comment was that the paper's headline mechanism
+was already published, the same question was asked again against 2024 to 2026
+work: has anything newer than FDC set a cached copy's expiry on the publisher's
+clock? A search plus a reading of a May 2026 survey of NDN caching
+(arXiv:2605.13104) turned up nothing that does. The closest remains Amadeo et
+al. 2020, which the paper credits.
+
+One paper could not be settled: Zhang, Lung, Lambadaris and St-Hilaire,
+"IoT Data Lifetime-Based Cooperative Caching Scheme for ICN-IoT Networks",
+IEEE ICC 2018, 10.1109/ICC.2018.8422100. Its title puts data lifetime at the
+center of a caching scheme. Its abstract is elided by the publisher, Semantic
+Scholar records it as closed access with no open PDF, and IEEE Xplore did not
+serve the text, so **its mechanism is undetermined**. It was therefore **not
+cited**: a citation placed in a paragraph that makes a negative claim about a
+group of schemes, written from a title, is the exact failure that let the FDC
+overlap stand. What protects the paper here is that it no longer claims
+priority for the expiry rule at all, so an unread prior work cannot falsify a
+claim the paper does not make.
