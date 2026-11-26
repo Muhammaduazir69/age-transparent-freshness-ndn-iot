@@ -34,13 +34,23 @@ A = open(aux, errors="replace").read()
 have = set()
 for m in re.finditer(r"\\newlabel\{[^}]*\}\{\{([0-9]+(?:\.[0-9]+)*)\}", A):
     have.add(m.group(1))
-for m in re.finditer(r"\\contentsline\s*\{[a-z]+\}\s*\{\\numberline\s*\{([0-9.]+)\}", A):
+for m in re.finditer(r"\\contentsline\s*\{(?:sub){0,2}section\}\s*\{\\numberline\s*\{([0-9.]+)\}", A):
     have.add(m.group(1).rstrip("."))
 fail = []
 
-refs = sorted(set(re.findall(r"§\s*([0-9]+(?:\.[0-9]+)*)", L)))
+refs = sorted(set(re.findall(r"§\s*([0-9]+(?:\.[0-9]+)*)", L)),
+              key=lambda r: [int(x) for x in r.split(".")])
 bad_refs = [r for r in refs if r not in have]
+# Titles, from the table of contents in the .aux. A reference can resolve and
+# still point at the wrong section: inserting one subsection shifted three of
+# this letter's references by one, and "it resolves" did not notice.
+titles = {}
+for m in re.finditer(r"\\contentsline\s*\{(?:sub){0,2}section\}\s*\{\\numberline\s*\{([0-9.]+)\}"
+                     r"([^}]*)\}", A):
+    titles.setdefault(m.group(1).rstrip("."), m.group(2).strip())
 print(f"section references: {len(refs)} distinct, {len(bad_refs)} unresolved")
+for r in refs:
+    print(f"   §{r:<7s} {titles.get(r, '(title not in the contents listing)')}")
 if bad_refs:
     fail.append(("section", bad_refs))
     print("   unresolved:", bad_refs)
